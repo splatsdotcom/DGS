@@ -5,27 +5,45 @@
 
 //-------------------------------------------//
 
-extern "C" void mgs_diff_render_forward_cuda(const float* in, float* out, int64_t N);
+extern "C" void mgs_diff_render_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outImg, const float* view, const float* proj, float focalX, float focalY,
+                                             const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics);
 
 //-------------------------------------------//
 
-at::Tensor mgs_diff_render_forward(at::Tensor input) 
+at::Tensor mgs_diff_render_forward(int64_t outWidth, int64_t outHeight, const at::Tensor& view, const at::Tensor& proj, double focalX, double focalY,
+                                   const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& colors, const at::Tensor& harmonics)
 {
 	//validate:
 	//---------------
-	TORCH_CHECK(input.device().is_cuda(), "input must be a CUDA tensor");
-	TORCH_CHECK(input.dtype() == torch::kFloat32, "input must be float32");
 
-	if(!input.is_contiguous())
-		input = input.contiguous();
+	//TODO
 
-	//run cuda:
+	//allocate buffers:
 	//---------------
-	at::Tensor output = torch::empty_like(input);
-	int64_t size = input.numel();
+	torch::TensorOptions floatOpts(torch::kFloat32);
+	torch::Device device(torch::kCUDA);
 
-	mgs_diff_render_forward_cuda(input.data_ptr<float>(), output.data_ptr<float>(), size);
-	return output;
+	at::Tensor outImage = torch::full({ outHeight, outWidth, 4 }, 0.0f, floatOpts.device(device));
+
+	//render:
+	//---------------
+	mgs_diff_render_forward_cuda(
+		(uint32_t)outWidth, (uint32_t)outHeight,
+		outImage.contiguous().data_ptr<float>(),
+
+		view.contiguous().data_ptr<float>(),
+		proj.contiguous().data_ptr<float>(),
+		(float)focalX, (float)focalY,
+
+		means    .contiguous().data_ptr<float>(),
+		scales   .contiguous().data_ptr<float>(),
+		rotations.contiguous().data_ptr<float>(),
+		opacities.contiguous().data_ptr<float>(),
+		colors   .contiguous().data_ptr<float>(),
+		harmonics.contiguous().data_ptr<float>()
+	);
+
+	return outImage;
 }
 
 //-------------------------------------------//
@@ -47,7 +65,7 @@ extern "C" {
 
 TORCH_LIBRARY(mgs_diff_renderer, m) 
 {
-	m.def("forward(Tensor x) -> Tensor");
+	m.def("forward(int outWidth, int outHeight, Tensor view, Tensor proj, float focalX, float focalY, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor colors, Tensor harmonics) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(mgs_diff_renderer, CUDA, m) 
