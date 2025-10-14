@@ -1,0 +1,3 @@
+[submodule "mgs_diff_renderer/src/external/QuickMath"]
+	path = mgs_diff_renderer/src/external/QuickMath
+	url = git@github.com:frozein/QuickMath.git

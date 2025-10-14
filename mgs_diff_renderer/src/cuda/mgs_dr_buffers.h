@@ -51,7 +51,7 @@ struct MGSDRgeomBuffers : public MGSDRrenderBuffers
 public:
 	MGSDRgeomBuffers(uint8_t* mem, uint32_t count);
 
-	uint2* pixCenters;
+	float2* pixCenters;
 	float* pixRadii;
 	float* depths;
 	uint32_t* tilesTouched;

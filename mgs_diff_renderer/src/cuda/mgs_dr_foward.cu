@@ -7,6 +7,9 @@
 
 #include "mgs_dr_buffers.h"
 
+#define QM_FUNC_ATTRIBS __device__ static inline
+#include "../external/QuickMath/quickmath.h"
+
 namespace cg = cooperative_groups;
 
 //-------------------------------------------//
@@ -17,9 +20,9 @@ namespace cg = cooperative_groups;
 //-------------------------------------------//
 
 __global__ void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(const float* view, const float* proj, float focalX, float focalY, 
+_mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
                                  uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 uint2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB);
+                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB);
 
 __global__ void __launch_bounds__(MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE) 
 _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, float* img);
@@ -47,7 +50,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	uint32_t numWorkgroupsPreprocess = (numGaussians + MGS_DR_PREPROCESS_WORKGROUP_SIZE - 1) / MGS_DR_PREPROCESS_WORKGROUP_SIZE;
 
 	_mgs_dr_foward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
-		view, proj, focalX, focalY,
+		outWidth, outHeight, view, proj, focalX, focalY,
 		numGaussians, means, scales, rotations, opacities, colors, harmonics,
 		geomBufs.pixCenters, geomBufs.pixRadii, geomBufs.depths, geomBufs.tilesTouched, geomBufs.conic, geomBufs.rgb
 	);
@@ -56,6 +59,14 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	uint32_t tilesTouched;
 	cudaMemcpy(&tilesTouched, geomBufs.tilesTouched, sizeof(uint32_t), cudaMemcpyDeviceToHost);
 	printf("tilesTouched: %d\n", tilesTouched);
+
+	float2 center;
+	cudaMemcpy(&center, geomBufs.pixCenters, sizeof(float2), cudaMemcpyDeviceToHost);
+	printf("center: %f, %f\n", center.x, center.y);
+
+	float rad;
+	cudaMemcpy(&rad, geomBufs.pixRadii, sizeof(float), cudaMemcpyDeviceToHost);
+	printf("rad: %f\n", rad);
 
 	//launch render kernel:
 	//---------------
@@ -79,21 +90,133 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 //-------------------------------------------//
 
 __global__ void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(const float* view, const float* proj, float focalX, float focalY, 
+_mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
                                  uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 uint2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB)
+                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if(idx >= numGaussians)
 		return;
 
-	//writing dummy data for now
-	outPixCenters[idx] = {1, 1};
-	outPixRadii[idx] = 10.0f;
-	outDepths[idx] = 14.0f;
-	outTilesTouched[idx] = 33;
-	outConic[idx] = { 1.0f, 2.0f, 3.0f, 4.0f };
-	outRGB[idx] = { 255.0f, 255.0f, 255.0f };
+	outTilesTouched[idx] = 0; //so we dont render if culled
+
+	//find view and clip pos:
+	//---------------
+	QMmat4 viewMat = qm_mat4_load(view);
+	QMmat4 projMat = qm_mat4_load(proj);
+	
+	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
+
+	QMvec4 camPos = qm_mat4_mult_vec4(
+		viewMat, 
+		(QMvec4){ mean.x, mean.y, mean.z, 1.0f }
+	);
+	QMvec4 clipPos = qm_mat4_mult_vec4(
+		projMat, camPos
+	);
+
+	//cull gaussians out of view:
+	//---------------
+
+	//TODO: tweak
+	float clip = 1.2 * clipPos.w;
+	if(clipPos.x >  clip || clipPos.y >  clip || clipPos.z >  clip ||
+	   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
+		return;
+
+	//compute covariance matrix:
+	//---------------
+	QMmat4 scaleMat = qm_mat4_scale(qm_vec3_load(&scales[idx * 3]));
+	QMmat4 rotMat = qm_quaternion_to_mat4(qm_quaternion_load(&rotations[idx * 4]));
+
+	QMmat4 M = qm_mat4_mult(scaleMat, rotMat);
+	float sigma[6] = {
+		4.0f * (M.m[0][0] * M.m[0][0] + M.m[0][1] * M.m[0][1] + M.m[0][2] * M.m[0][2]),
+		4.0f * (M.m[0][0] * M.m[1][0] + M.m[0][1] * M.m[1][1] + M.m[0][2] * M.m[1][2]),
+		4.0f * (M.m[0][0] * M.m[2][0] + M.m[0][1] * M.m[2][1] + M.m[0][2] * M.m[2][2]),
+		4.0f * (M.m[1][0] * M.m[1][0] + M.m[1][1] * M.m[1][1] + M.m[1][2] * M.m[1][2]),
+		4.0f * (M.m[1][0] * M.m[2][0] + M.m[1][1] * M.m[2][1] + M.m[1][2] * M.m[2][2]),
+		4.0f * (M.m[2][0] * M.m[2][0] + M.m[2][1] * M.m[2][1] + M.m[2][2] * M.m[2][2])
+	};
+
+	QMmat3 cov = {{
+		{ sigma[0], sigma[1], sigma[2] },
+		{ sigma[1], sigma[3], sigma[4] },
+		{ sigma[2], sigma[4], sigma[5] }
+	}};
+
+	//project covariance matrix to 2D:
+	//---------------
+	QMmat3 J = {{
+		{ -focalX / camPos.z, 0.0,                 (focalX * camPos.x) / (camPos.z * camPos.z) },
+		{ 0.0,                -focalY / camPos.z,  (focalY * camPos.y) / (camPos.z * camPos.z) },
+		{ 0.0,                0.0,                 0.0                                         }
+	}};
+
+	QMmat3 T = qm_mat3_mult(
+		qm_mat3_transpose(qm_mat4_top_left(viewMat)),
+		J
+	);
+
+	QMmat3 cov2d = qm_mat3_mult(
+		qm_mat3_transpose(T),
+		qm_mat3_mult(cov, T)
+	);
+
+	//compute inverse 2d covariance:
+	//---------------
+	float det = cov2d.m[0][0] * cov2d.m[1][1] - cov2d.m[0][1] * cov2d.m[1][0];
+	if(det == 0.0f)
+		return;
+
+	QMvec3 conic = qm_vec3_scale((QMvec3){ cov2d.m[1][1], -cov2d.m[1][0], cov2d.m[0][0]}, 1.0f / det);
+
+	//compute eigenvalues:
+	//---------------
+	float midpoint = (cov2d.m[0][0] + cov2d.m[1][1]) / 2.0;
+	float radius = qm_vec2_length((QMvec2){ (cov2d.m[0][0] - cov2d.m[1][1]) / 2.0, cov2d.m[0][1] });
+
+	float lambda1 = midpoint + radius;
+	float lambda2 = midpoint - radius;
+
+	if(lambda2 < 0.0) //degenerate. TODO: do we need to check for this?
+		return;
+
+	//compute image tiles:
+	//---------------
+	float pixCenterX = ((clipPos.x + 1.0) * 0.5 * width ) - 0.5;
+	float pixCenterY = ((clipPos.y + 1.0) * 0.5 * height) - 0.5;
+
+	//TODO: tweak
+	float pixRadius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
+
+	//TODO: use a smarter method to generate tiles
+	//this generates far too many tiles for very anisotropic gaussians
+	uint32_t tileWidth  = (width  + MGS_DR_TILE_SIZE - 1) / MGS_DR_TILE_SIZE;
+	uint32_t tileHeight = (height + MGS_DR_TILE_SIZE - 1) / MGS_DR_TILE_SIZE;
+
+	uint32_t tileMinX = (uint32_t)min(max((int32_t)((pixCenterX - pixRadius)                        / MGS_DR_TILE_SIZE), 0), tileWidth  - 1);
+	uint32_t tileMinY = (uint32_t)min(max((int32_t)((pixCenterY - pixRadius)                        / MGS_DR_TILE_SIZE), 0), tileHeight - 1);
+	uint32_t tileMaxX = (uint32_t)min(max((int32_t)((pixCenterX + pixRadius + MGS_DR_TILE_SIZE - 1) / MGS_DR_TILE_SIZE), 0), tileWidth  - 1);
+	uint32_t tileMaxY = (uint32_t)min(max((int32_t)((pixCenterY + pixRadius + MGS_DR_TILE_SIZE - 1) / MGS_DR_TILE_SIZE), 0), tileHeight - 1);
+
+	if(tileMinX >= tileMaxX || tileMinY >= tileMaxY)
+		return;
+
+	//compute spherical harmonics:
+	//---------------
+	QMvec3 color = qm_vec3_load(&colors[idx * 3]);
+
+	//TODO: actual SH
+
+	//write out:
+	//---------------
+	outPixCenters[idx] = { pixCenterX, pixCenterY };
+	outPixRadii[idx] = pixRadius;
+	outDepths[idx] = camPos.z;
+	outTilesTouched[idx] = (tileMaxX - tileMinX) * (tileMaxY - tileMinY);
+	outConic[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+	outRGB[idx] = { color.x, color.y, color.z };
 }
 
 __global__ void __launch_bounds__(MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE) 
