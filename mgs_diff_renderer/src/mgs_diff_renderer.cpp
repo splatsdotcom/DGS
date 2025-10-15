@@ -18,7 +18,8 @@ std::function<uint8_t* (uint64_t size)> _mgs_dr_tensor_resize_function(at::Tenso
 //-------------------------------------------//
 
 at::Tensor mgs_dr_forward(int64_t outWidth, int64_t outHeight, const at::Tensor& view, const at::Tensor& proj, double focalX, double focalY,
-                          const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& colors, const at::Tensor& harmonics)
+                          const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& colors, const at::Tensor& harmonics,
+                          bool debug)
 {
 	//validate:
 	//---------------
@@ -59,7 +60,9 @@ at::Tensor mgs_dr_forward(int64_t outWidth, int64_t outHeight, const at::Tensor&
 
 		_mgs_dr_tensor_resize_function(geomBuf),
 		_mgs_dr_tensor_resize_function(binningBuf),
-		_mgs_dr_tensor_resize_function(imageBuf)
+		_mgs_dr_tensor_resize_function(imageBuf),
+
+		debug
 	);
 
 	//return:
@@ -86,7 +89,7 @@ extern "C" {
 
 TORCH_LIBRARY(mgs_diff_renderer, m) 
 {
-	m.def("forward(int outWidth, int outHeight, Tensor view, Tensor proj, float focalX, float focalY, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor colors, Tensor harmonics) -> Tensor");
+	m.def("forward(int outWidth, int outHeight, Tensor view, Tensor proj, float focalX, float focalY, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor colors, Tensor harmonics, bool debug) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(mgs_diff_renderer, CUDA, m) 

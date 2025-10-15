@@ -1,3 +1,5 @@
+#define __FILENAME__ "mgs_dr_forward.cu"
+
 #include "mgs_dr_forward.h"
 
 #include <cuda_runtime.h>
@@ -8,6 +10,7 @@
 #include <cub/device/device_radix_sort.cuh>
 
 #include "mgs_dr_buffers.h"
+#include "mgs_dr_global.h"
 
 #define QM_FUNC_ATTRIBS __device__ static inline
 #include "../external/QuickMath/quickmath.h"
@@ -58,7 +61,8 @@ __device__ __host__ static __forceinline__ uint32_t _mgs_ceildivide32(uint32_t a
 
 uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outImg, const float* view, const float* proj, float focalX, float focalY,
                              uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                             std::function<uint8_t* (uint64_t size)> createGeomBuf, std::function<uint8_t* (uint64_t size)> createBinningBuf, std::function<uint8_t* (uint64_t size)> createImageBuf) 
+                             std::function<uint8_t* (uint64_t size)> createGeomBuf, std::function<uint8_t* (uint64_t size)> createBinningBuf, std::function<uint8_t* (uint64_t size)> createImageBuf,
+                             bool debug)
 {
 	//allocate geometry + image buffers:
 	//---------------
@@ -73,9 +77,13 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		MGSDRimageBuffers::required_mem<MGSDRimageBuffers>(outWidth * outHeight)
 	);
 	
-	MGSDRgeomBuffers geomBufs(geomBufMem, numGaussians);
-	MGSDRimageBuffers imageBufs(imageBufMem, outWidth * outHeight);
-
+	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
+		geomBufMem, numGaussians
+	));
+	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
+		imageBufMem, outWidth * outHeight
+	));
+	
 	//preprocess:
 	//---------------
 	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
@@ -84,22 +92,28 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		numGaussians, means, scales, rotations, opacities, colors, harmonics,
 		geomBufs.pixCenters, geomBufs.pixRadii, geomBufs.depths, geomBufs.tilesTouched, geomBufs.conic, geomBufs.rgb
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
 
 	//prefix sum on tile counts:
 	//---------------
-	cub::DeviceScan::InclusiveSum(
+	MGS_DR_CUDA_ERROR_CHECK(cub::DeviceScan::InclusiveSum(
 		geomBufs.tilesTouchedScanTemp, geomBufs.tilesTouchedScanTempSize, geomBufs.tilesTouched, geomBufs.tilesTouchedScan, numGaussians
-	);
+	));
 
 	uint32_t numRendered;
-	cudaMemcpy(&numRendered, geomBufs.tilesTouchedScan + numGaussians - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+	MGS_DR_CUDA_ERROR_CHECK(cudaMemcpy(
+		&numRendered, geomBufs.tilesTouchedScan + numGaussians - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost
+	));
 
 	//allocate binning buffers:
 	//---------------
 	uint8_t* binningBufMem = createBinningBuf(
 		MGSDRrenderBuffers::required_mem<MGSDRbinningBuffers>(numRendered)
 	);
-	MGSDRbinningBuffers binningBufs(binningBufMem, numRendered);
+
+	MGSDRbinningBuffers binningBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRbinningBuffers(
+		binningBufMem, numRendered
+	));
 
 	//write keys:
 	//---------------
@@ -109,6 +123,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		numGaussians, geomBufs.pixCenters, geomBufs.pixRadii, geomBufs.depths, geomBufs.tilesTouchedScan,
 		binningBufs.keys, binningBufs.indices
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
 
 	//sort keys:
 	//---------------
@@ -119,20 +134,23 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		tilesLen >>= 1;
 	}
 
-	cub::DeviceRadixSort::SortPairs(
+	MGS_DR_CUDA_ERROR_CHECK(cub::DeviceRadixSort::SortPairs(
 		binningBufs.sortTemp, binningBufs.sortTempSize,
 		binningBufs.keys, binningBufs.keysSorted, binningBufs.indices, binningBufs.indicesSorted,
 		numRendered, 0, 32 + numTileBits
-	);
+	));
 
 	//get tile ranges:
 	//---------------
-	cudaMemset(imageBufs.tileRanges, 0, tilesWidth * tilesHeight * sizeof(uint2));
+	MGS_DR_CUDA_ERROR_CHECK(cudaMemset(
+		imageBufs.tileRanges, 0, tilesWidth * tilesHeight * sizeof(uint2)
+	));
 
 	uint32_t numWorkgroupsFindTileRanges = _mgs_ceildivide32(numRendered, MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE);
 	_mgs_dr_forward_find_tile_ranges_kernel<<<numWorkgroupsFindTileRanges, MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE>>>(
 		numRendered, binningBufs.keysSorted, imageBufs.tileRanges
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
 
 	//splat:
 	//---------------
@@ -141,16 +159,11 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs.pixCenters, geomBufs.conic, geomBufs.rgb,
 		outImg
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
 
 	//return:
 	//---------------
-
-	//TODO proper error checking
-	cudaError_t err = cudaGetLastError();
-	if(err != cudaSuccess)
-		printf("CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-
-	return 0;
+	return numRendered;
 }
 
 //-------------------------------------------//

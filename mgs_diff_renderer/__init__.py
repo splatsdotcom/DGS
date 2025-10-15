@@ -8,11 +8,13 @@ class _RenderFunction(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, 
 				outWidth, outHeight, view, proj, focalX, focalY,
-				means, scales, rotations, opacities, colors, harmomics):
+				means, scales, rotations, opacities, colors, harmomics,
+				debug=False):
 		
 		return torch.ops.mgs_diff_renderer.forward(
 			outWidth, outHeight, view, proj, focalX, focalY,
-			means, scales, rotations, opacities, colors, harmomics
+			means, scales, rotations, opacities, colors, harmomics,
+			debug
 		)
 
 	@staticmethod
@@ -20,9 +22,11 @@ class _RenderFunction(torch.autograd.Function):
 		return torch.zeros_like(grad_output)
 
 def render(outWidth: int, outHeight: int, view: torch.Tensor, proj: torch.Tensor, focalX: float, focalY: float,
-		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmomics: torch.Tensor) -> torch.Tensor:
+		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmomics: torch.Tensor,
+		   debug: bool = False) -> torch.Tensor:
 
 	return _RenderFunction.apply(
 		outWidth, outHeight, view, proj, focalX, focalY,
-		means, scales, rotations, opacities, colors, harmomics
+		means, scales, rotations, opacities, colors, harmomics,
+		debug
 	)

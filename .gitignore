@@ -3,3 +3,8 @@ build/
 *.so
 __pycache__/
 *.egg-info/
+
+# testing input/output data
+*.png
+*.ply
+*.mp4

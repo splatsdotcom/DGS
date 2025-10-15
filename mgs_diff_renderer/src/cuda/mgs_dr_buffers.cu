@@ -1,9 +1,14 @@
+#define __FILENAME__ "mgs_dr_forward.cu"
+
 #include "mgs_dr_buffers.h"
 
 #include <cub/cub.cuh>
 #include <cub/device/device_radix_sort.cuh>
+#include "mgs_dr_global.h"
 
 //-------------------------------------------//
+
+//TODO: should we pass debug here and validate the empty sum/sort calls?
 
 MGSDRrenderBuffers::MGSDRrenderBuffers(uint8_t* mem, uint32_t count) :
 	m_mem(mem), m_count(count)
