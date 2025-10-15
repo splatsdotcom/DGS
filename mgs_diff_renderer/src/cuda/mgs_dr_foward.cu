@@ -19,6 +19,8 @@ namespace cg = cooperative_groups;
 
 //-------------------------------------------//
 
+//TODO: tweak these!
+
 #define MGS_DR_TILE_SIZE 16
 #define MGS_DR_TILE_LEN (MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE)
 
@@ -64,8 +66,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
                              std::function<uint8_t* (uint64_t size)> createGeomBuf, std::function<uint8_t* (uint64_t size)> createBinningBuf, std::function<uint8_t* (uint64_t size)> createImageBuf,
                              bool debug)
 {
+	MGS_DR_PROFILE_REGION_START(total);
+
 	//allocate geometry + image buffers:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(allocateGeomImage);
+
 	uint32_t tilesWidth  = _mgs_ceildivide32(outWidth , MGS_DR_TILE_SIZE);
 	uint32_t tilesHeight = _mgs_ceildivide32(outHeight, MGS_DR_TILE_SIZE);
 	uint32_t tilesLen = tilesWidth * tilesHeight;
@@ -84,8 +90,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		imageBufMem, outWidth * outHeight
 	));
 	
+	MGS_DR_PROFILE_REGION_END(allocateGeomImage);
+
 	//preprocess:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(preprocess);
+
 	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_foward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
 		outWidth, outHeight, view, proj, focalX, focalY,
@@ -94,8 +104,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
+	MGS_DR_PROFILE_REGION_END(preprocess);
+
 	//prefix sum on tile counts:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(tileCountScan);
+
 	MGS_DR_CUDA_ERROR_CHECK(cub::DeviceScan::InclusiveSum(
 		geomBufs.tilesTouchedScanTemp, geomBufs.tilesTouchedScanTempSize, geomBufs.tilesTouched, geomBufs.tilesTouchedScan, numGaussians
 	));
@@ -105,8 +119,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		&numRendered, geomBufs.tilesTouchedScan + numGaussians - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost
 	));
 
+	MGS_DR_PROFILE_REGION_END(tileCountScan);
+
 	//allocate binning buffers:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(allocateBinning);
+
 	uint8_t* binningBufMem = createBinningBuf(
 		MGSDRrenderBuffers::required_mem<MGSDRbinningBuffers>(numRendered)
 	);
@@ -115,8 +133,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		binningBufMem, numRendered
 	));
 
+	MGS_DR_PROFILE_REGION_END(allocateBinning);
+
 	//write keys:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(writeKeys);
+
 	uint32_t numWorkgroupsWriteKeys = _mgs_ceildivide32(numGaussians, MGS_DR_KEY_WRITE_WORKGROUP_SIZE);
 	_mgs_dr_forward_write_keys_kernel<<<numWorkgroupsWriteKeys, MGS_DR_KEY_WRITE_WORKGROUP_SIZE>>>(
 		outWidth, outHeight,
@@ -125,8 +147,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
+	MGS_DR_PROFILE_REGION_END(writeKeys);
+
 	//sort keys:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(sortKeys);
+
 	uint32_t numTileBits = 0;
 	while(tilesLen > 0)
 	{
@@ -140,8 +166,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		numRendered, 0, 32 + numTileBits
 	));
 
+	MGS_DR_PROFILE_REGION_END(sortKeys);
+
 	//get tile ranges:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(tileRanges);
+
 	MGS_DR_CUDA_ERROR_CHECK(cudaMemset(
 		imageBufs.tileRanges, 0, tilesWidth * tilesHeight * sizeof(uint2)
 	));
@@ -152,14 +182,38 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
+	MGS_DR_PROFILE_REGION_END(tileRanges);
+
 	//splat:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(splat);
+
 	_mgs_dr_forward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
 		outWidth, outHeight,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs.pixCenters, geomBufs.conic, geomBufs.rgb,
 		outImg
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
+
+	MGS_DR_PROFILE_REGION_END(splat);
+
+	//print timing information:
+	//---------------
+	MGS_DR_PROFILE_REGION_END(total);
+
+#ifdef MGS_DR_PROFILE
+	std::cout << std::endl;
+	std::cout << "TOTAL FRAME RENDER TIME: " << MGS_DR_PROFILE_REGION_TIME(total) << "ms" << std::endl;
+	std::cout << "\t- Allocating geom + image buffers: " << MGS_DR_PROFILE_REGION_TIME(allocateGeomImage) << "ms" << std::endl;
+	std::cout << "\t- Preprocessing:                   " << MGS_DR_PROFILE_REGION_TIME(preprocess)        << "ms" << std::endl;
+	std::cout << "\t- Tile count scan:                 " << MGS_DR_PROFILE_REGION_TIME(tileCountScan)     << "ms" << std::endl;
+	std::cout << "\t- Allocating binning buffers:      " << MGS_DR_PROFILE_REGION_TIME(allocateBinning)   << "ms" << std::endl;
+	std::cout << "\t- Writing render keys:             " << MGS_DR_PROFILE_REGION_TIME(writeKeys)         << "ms" << std::endl;
+	std::cout << "\t- Sorting render keys:             " << MGS_DR_PROFILE_REGION_TIME(sortKeys)          << "ms" << std::endl;
+	std::cout << "\t- Finding tile ranges:             " << MGS_DR_PROFILE_REGION_TIME(tileRanges)        << "ms" << std::endl;
+	std::cout << "\t- Rasterizing:                     " << MGS_DR_PROFILE_REGION_TIME(splat)             << "ms" << std::endl;
+	std::cout << std::endl;
+#endif
 
 	//return:
 	//---------------
@@ -246,9 +300,6 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 
 	float lambda1 = midpoint + radius;
 	float lambda2 = midpoint - radius;
-
-	if(lambda2 < 0.0) //degenerate. TODO: do we need to check for this?
-		return;
 
 	//compute image tiles:
 	//---------------
