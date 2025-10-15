@@ -17,9 +17,15 @@ namespace cg = cooperative_groups;
 //-------------------------------------------//
 
 #define MGS_DR_TILE_SIZE 16
-#define MGS_DR_PREPROCESS_WORKGROUP_SIZE 64
-#define MGS_DR_KEY_WRITE_WORKGROUP_SIZE  64
+#define MGS_DR_TILE_LEN (MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE)
+
+#define MGS_DR_PREPROCESS_WORKGROUP_SIZE       64
+#define MGS_DR_KEY_WRITE_WORKGROUP_SIZE        64
 #define MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE 64
+
+#define MGS_DR_MAX_ALPHA 0.99f
+#define MGS_DR_MIN_ALPHA (1.0f / 255.0f)
+#define MGS_DR_ACCUM_ALPHA_CUTOFF 0.00001f
 
 //-------------------------------------------//
 
@@ -36,8 +42,10 @@ _mgs_dr_forward_write_keys_kernel(uint32_t width, uint32_t height,
 __global__ static void __launch_bounds__(MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE)
 _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* keys, uint2* outRanges);
 
-__global__ static void __launch_bounds__(MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE) 
-_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, float* img);
+__global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
+_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
+                             const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
+                             float* outColor);
 
 __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, QMvec2 pixCenter, float pixRadius, uint2& tileMin, uint2& tileMax);
 
@@ -86,8 +94,6 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	uint32_t numRendered;
 	cudaMemcpy(&numRendered, geomBufs.tilesTouchedScan + numGaussians - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
-	printf("num rendered: %d\n", numRendered);
-
 	//allocate binning buffers:
 	//---------------
 	uint8_t* binningBufMem = createBinningBuf(
@@ -128,31 +134,12 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 		numRendered, binningBufs.keysSorted, imageBufs.tileRanges
 	);
 
-	uint2 ranges[1000];
-
-	cudaMemcpy(&ranges, imageBufs.tileRanges, sizeof(ranges), cudaMemcpyDeviceToHost);
-
-	for(uint32_t i = 0; i < 1000; i++)
-		printf("%d: (%d, %d)\n", i, ranges[i].x, ranges[i].y);
-
-
-	//verifying dummy data
-	uint32_t tilesTouched;
-	cudaMemcpy(&tilesTouched, geomBufs.tilesTouched, sizeof(uint32_t), cudaMemcpyDeviceToHost);
-	printf("tilesTouched: %d\n", tilesTouched);
-
-	float2 center;
-	cudaMemcpy(&center, geomBufs.pixCenters, sizeof(float2), cudaMemcpyDeviceToHost);
-	printf("center: %f, %f\n", center.x, center.y);
-
-	float rad;
-	cudaMemcpy(&rad, geomBufs.pixRadii, sizeof(float), cudaMemcpyDeviceToHost);
-	printf("rad: %f\n", rad);
-
 	//splat:
 	//---------------
 	_mgs_dr_forward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
-		outWidth, outHeight, outImg
+		outWidth, outHeight,
+		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs.pixCenters, geomBufs.conic, geomBufs.rgb,
+		outImg
 	);
 
 	//return:
@@ -272,13 +259,13 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	//TODO: tweak
 	float pixRadius = ceil(3.0f * sqrt(max(lambda1, lambda2)));
 
-	uint2 tileMin, tileMax;
+	uint2 tilesMin, tilesMax;
 	_mgs_dr_get_tile_bounds(
 		width, height, pixCenter, pixRadius,
-		tileMin, tileMax
+		tilesMin, tilesMax
 	);
 
-	if(tileMin.x >= tileMax.x || tileMin.y >= tileMax.y)
+	if(tilesMin.x >= tilesMax.x || tilesMin.y >= tilesMax.y)
 		return;
 
 	//compute spherical harmonics:
@@ -292,7 +279,7 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	outPixCenters[idx] = { pixCenter.x, pixCenter.y };
 	outPixRadii[idx] = pixRadius;
 	outDepths[idx] = camPos.z;
-	outTilesTouched[idx] = (tileMax.x - tileMin.x) * (tileMax.y - tileMin.y);
+	outTilesTouched[idx] = (tilesMax.x - tilesMin.x) * (tilesMax.y - tilesMin.y);
 	outConic[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	outRGB[idx] = { color.x, color.y, color.z };
 }
@@ -313,23 +300,21 @@ _mgs_dr_forward_write_keys_kernel(uint32_t width, uint32_t height,
 
 	//get tile bounds:
 	//---------------
-	uint2 tileMin, tileMax;
+	uint2 tilesMin, tilesMax;
 	_mgs_dr_get_tile_bounds(
 		width, height, qm_vec2_load((const float*)&pixCenters[idx]), pixRadii[idx],
-		tileMin, tileMax
+		tilesMin, tilesMax
 	);
 
 	//write keys:
 	//---------------
 	uint32_t writeIdx = (idx == 0) ? 0 : offsets[idx - 1];
+	uint32_t tilesWidth  = _mgs_ceildivide32(width , MGS_DR_TILE_SIZE);
 
-	uint32_t tileWidth  = _mgs_ceildivide32(width , MGS_DR_TILE_SIZE);
-	uint32_t tileHeight = _mgs_ceildivide32(height, MGS_DR_TILE_SIZE);
-
-	for(uint32_t y = tileMin.y; y < tileMax.y; y++)
-	for(uint32_t x = tileMin.x; x < tileMax.x; x++)
+	for(uint32_t y = tilesMin.y; y < tilesMax.y; y++)
+	for(uint32_t x = tilesMin.x; x < tilesMax.x; x++)
 	{
-		uint32_t tileIdx = x + tileWidth * y;
+		uint32_t tileIdx = x + tilesWidth * y;
 		uint64_t key = ((uint64_t)tileIdx << 32) | *((uint32_t*)&depths[idx]);
 
 		outKeys[writeIdx] = key;
@@ -363,11 +348,15 @@ _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* ke
 		outRanges[tileIdx].y = numRendered;
 }
 
-__global__ static void __launch_bounds__(MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE) 
-_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, float* img)
+__global__ static void __launch_bounds__(MGS_DR_TILE_LEN)
+_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
+                             const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
+                             float* outColor)
 {
+	//compute pixel position:
+	//---------------
 	auto block = cg::this_thread_block();
-	uint32_t numBlocksX = (width + MGS_DR_TILE_SIZE - 1) / MGS_DR_TILE_SIZE;
+	uint32_t tilesWidth = _mgs_ceildivide32(width, MGS_DR_TILE_SIZE);
 
 	uint32_t pixelMinX = block.group_index().x * MGS_DR_TILE_SIZE;
 	uint32_t pixelMinY = block.group_index().y * MGS_DR_TILE_SIZE;
@@ -381,17 +370,87 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, float* img)
 	uint32_t pixelId = pixelX + width * pixelY;
 
 	bool inside = pixelX < width && pixelY < height;
-	if(!inside)
-		return;
 
-	float u = (float)pixelX / width;
-	float v = (float)pixelY / height;
+	//read gaussian range:
+	//---------------
+	uint2 range = ranges[block.group_index().x + tilesWidth * block.group_index().y];
+	int32_t numToRender = range.y - range.x;
+	uint32_t numRounds = _mgs_ceildivide32(numToRender, MGS_DR_TILE_LEN);
 
-	uint32_t writeIdx = pixelId * 4;
-	img[writeIdx + 0] = u;
-	img[writeIdx + 1] = v;
-	img[writeIdx + 2] = 0.0f;
-	img[writeIdx + 3] = 1.0f;
+	//allocate shared memory:
+	//---------------
+	__shared__ float2 collectedPixCenters[MGS_DR_TILE_LEN];
+	__shared__ float4 collectedConic[MGS_DR_TILE_LEN];
+	__shared__ QMvec3 collectedRGB[MGS_DR_TILE_LEN];
+
+	//loop over batches until all threads are done:
+	//---------------
+	bool done = !inside;
+
+	float accumAlpha = 1.0f;
+	QMvec3 accumColor = qm_vec3_full(0.0f);
+
+	for(uint32_t i = 0; i < numRounds; i++)
+	{
+		//exit early if all threads done
+		int numDone = __syncthreads_count(done);
+		if(numDone == MGS_DR_TILE_LEN)
+			break;
+
+		//collectively load gaussian data
+		uint32_t loadIdx = i * MGS_DR_TILE_LEN + block.thread_rank();
+		if(range.x + loadIdx < range.y)
+		{
+			uint32_t gaussianIdx = indices[range.x + loadIdx];
+			collectedPixCenters[block.thread_rank()] = pixCenters[gaussianIdx];
+			collectedConic[block.thread_rank()] = conic[gaussianIdx];
+			collectedRGB[block.thread_rank()] = qm_vec3_load((const float*)&rgb[gaussianIdx]);
+		}
+
+		block.sync();
+
+		//accumulate collected gaussians
+		for(uint32_t j = 0; j < min(MGS_DR_TILE_LEN, numToRender); j++)
+		{
+			float2 pos = collectedPixCenters[j];
+			float4 conic = collectedConic[j];
+
+			float dx = pos.x - (float)pixelX;
+			float dy = pos.y - (float)pixelY;
+
+			float power = -0.5f * (conic.x * dx * dx + conic.z * dy * dy) - conic.y * dx * dy;
+			if(power > 0.0f)
+				continue;
+
+			float alpha = min(MGS_DR_MAX_ALPHA, conic.w * exp(power));
+			if(alpha < MGS_DR_MIN_ALPHA)
+				continue;
+			
+			float newAccumAlpha = accumAlpha * (1.0f - alpha);
+			if(newAccumAlpha < MGS_DR_ACCUM_ALPHA_CUTOFF)
+			{
+				done = true;
+				continue;
+			}
+
+			accumColor = qm_vec3_add(accumColor, qm_vec3_scale(collectedRGB[j], alpha * accumAlpha));
+			accumAlpha = newAccumAlpha;
+		}
+
+		//decrement num left to render
+		numToRender -= MGS_DR_TILE_LEN;
+	}
+
+	//write final color:
+	//---------------
+	if(inside)
+	{
+		uint32_t writeIdx = pixelId * 4;
+		outColor[writeIdx + 0] = accumColor.r;
+		outColor[writeIdx + 1] = accumColor.g;
+		outColor[writeIdx + 2] = accumColor.b;
+		outColor[writeIdx + 3] = 1.0f;// - accumAlpha;
+	}
 }
 
 __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, QMvec2 pixCenter, float pixRadius, uint2& tileMin, uint2& tileMax)

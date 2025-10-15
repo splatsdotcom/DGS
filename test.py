@@ -48,11 +48,11 @@ def main():
 
 	# --- Single Gaussian setup ---
 	numGaussians = 1
-	means = torch.tensor([[0.0, 0.0, 0.0]], dtype=torch.float32, device='cuda')
-	scales = torch.tensor([[0.2, 0.2, 0.2]], dtype=torch.float32, device='cuda')  # isotropic radius
-	rotations = torch.tensor([[0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')  # identity quaternion
-	opacities = torch.tensor([[1.0]], dtype=torch.float32, device='cuda')
-	colors = torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32, device='cuda')  # white
+	means = torch.tensor([[0.25, 0.0, 0.0], [-0.25, 0.1, 0.1]], dtype=torch.float32, device='cuda')
+	scales = torch.tensor([[0.2, 0.02, 0.02], [0.3, 0.1, 0.1]], dtype=torch.float32, device='cuda')  # isotropic radius
+	rotations = torch.tensor([[0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')  # identity quaternion
+	opacities = torch.tensor([[1.0], [1.0]], dtype=torch.float32, device='cuda')
+	colors = torch.tensor([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')  # white
 	harmonics = torch.zeros((numGaussians, 15, 3), dtype=torch.float32, device='cuda')  # ignore SH
 
 	# --- Render ---
