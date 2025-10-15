@@ -1,5 +1,8 @@
 #include "mgs_dr_buffers.h"
 
+#include <cub/cub.cuh>
+#include <cub/device/device_radix_sort.cuh>
+
 //-------------------------------------------//
 
 MGSDRrenderBuffers::MGSDRrenderBuffers(uint8_t* mem, uint32_t count) :
@@ -11,16 +14,33 @@ MGSDRrenderBuffers::MGSDRrenderBuffers(uint8_t* mem, uint32_t count) :
 MGSDRgeomBuffers::MGSDRgeomBuffers(uint8_t* mem, uint32_t count) :
 	MGSDRrenderBuffers(mem, count)
 {
-	pixCenters   = bump<float2>();
-	pixRadii     = bump<float>();
-	depths       = bump<float>();
-	tilesTouched = bump<uint32_t>();
-	conic        = bump<float4>();
-	rgb          = bump<float3>();
+	pixCenters       = bump<float2>();
+	pixRadii         = bump<float>();
+	depths           = bump<float>();
+	tilesTouched     = bump<uint32_t>();
+	conic            = bump<float4>();
+	rgb              = bump<float3>();
+	tilesTouchedScan = bump<uint32_t>();
+
+	cub::DeviceScan::InclusiveSum(nullptr, tilesTouchedScanTempSize, tilesTouched, tilesTouchedScan, count);
+	tilesTouchedScanTemp = bump<uint8_t>(tilesTouchedScanTempSize);
 }
 
 MGSDRbinningBuffers::MGSDRbinningBuffers(uint8_t* mem, uint32_t count) :
 	MGSDRrenderBuffers(mem, count)
 {
-	test = bump<uint32_t>();
+	keys          = bump<uint64_t>();
+	indices       = bump<uint32_t>();
+	keysSorted    = bump<uint64_t>();
+	indicesSorted = bump<uint32_t>();
+
+	cub::DeviceRadixSort::SortPairs(nullptr, sortTempSize, keys, keysSorted, indices, indicesSorted, count);
+	sortTemp = bump<uint8_t>(sortTempSize);
+}
+
+MGSDRimageBuffers::MGSDRimageBuffers(uint8_t* mem, uint32_t count) :
+	MGSDRrenderBuffers(mem, count)
+{
+	//TODO: this is wasteful! only need 1 per tile, can also get away with just a uint32_t
+	tileRanges = bump<uint2>();
 }

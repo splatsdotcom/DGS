@@ -33,8 +33,9 @@ at::Tensor mgs_dr_forward(int64_t outWidth, int64_t outHeight, const at::Tensor&
 
 	at::Tensor outImage = torch::full({ outHeight, outWidth, 4 }, 0.0f, floatOpts.device(device));
 
-	at::Tensor geomBuf = torch::empty({0}, byteOpts.device(device));
+	at::Tensor geomBuf    = torch::empty({0}, byteOpts.device(device));
 	at::Tensor binningBuf = torch::empty({0}, byteOpts.device(device));
+	at::Tensor imageBuf   = torch::empty({0}, byteOpts.device(device));
 
 	//render:
 	//---------------
@@ -57,7 +58,8 @@ at::Tensor mgs_dr_forward(int64_t outWidth, int64_t outHeight, const at::Tensor&
 		harmonics.contiguous().data_ptr<float>(),
 
 		_mgs_dr_tensor_resize_function(geomBuf),
-		_mgs_dr_tensor_resize_function(binningBuf)
+		_mgs_dr_tensor_resize_function(binningBuf),
+		_mgs_dr_tensor_resize_function(imageBuf)
 	);
 
 	//return:

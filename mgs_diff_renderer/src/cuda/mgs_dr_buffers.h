@@ -44,6 +44,18 @@ protected:
 
 		return ptr;
 	}
+
+	template<typename T>
+	T* bump(uint64_t size)
+	{
+		uint64_t alignment = std::max((uint64_t)MGS_DR_L1_CACHE_ALIGNMENT, (uint64_t)sizeof(T));
+		uint64_t offset = (reinterpret_cast<uintptr_t>(m_mem) + alignment - 1) & ~(alignment - 1);
+		
+		T* ptr = reinterpret_cast<T*>(offset);
+		m_mem = reinterpret_cast<uint8_t*>(ptr) + size;
+
+		return ptr;
+	}
 };
 
 struct MGSDRgeomBuffers : public MGSDRrenderBuffers
@@ -55,8 +67,12 @@ public:
 	float* pixRadii;
 	float* depths;
 	uint32_t* tilesTouched;
+	uint32_t* tilesTouchedScan;
 	float4* conic;
 	float3* rgb;
+
+	size_t tilesTouchedScanTempSize;
+	uint8_t* tilesTouchedScanTemp;
 };
 
 struct MGSDRbinningBuffers : public MGSDRrenderBuffers
@@ -64,7 +80,21 @@ struct MGSDRbinningBuffers : public MGSDRrenderBuffers
 public:
 	MGSDRbinningBuffers(uint8_t* mem, uint32_t count);
 
-	uint32_t* test; //todo 
+	uint64_t* keys;
+	uint32_t* indices;
+	uint64_t* keysSorted;
+	uint32_t* indicesSorted;
+
+	size_t sortTempSize;
+	uint8_t* sortTemp;
+};
+
+struct MGSDRimageBuffers : public MGSDRrenderBuffers
+{
+public:
+	MGSDRimageBuffers(uint8_t* mem, uint32_t count);
+
+	uint2* tileRanges;
 };
 
 #endif //#ifndef MGS_DR_BUFFERS_H
