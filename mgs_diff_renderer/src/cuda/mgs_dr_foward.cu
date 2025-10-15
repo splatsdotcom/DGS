@@ -196,21 +196,9 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	QMmat4 scaleMat = qm_mat4_scale(qm_vec3_load(&scales[idx * 3]));
 	QMmat4 rotMat = qm_quaternion_to_mat4(qm_quaternion_load(&rotations[idx * 4]));
 
-	QMmat4 M = qm_mat4_mult(scaleMat, rotMat);
-	float sigma[6] = {
-		4.0f * (M.m[0][0] * M.m[0][0] + M.m[0][1] * M.m[0][1] + M.m[0][2] * M.m[0][2]),
-		4.0f * (M.m[0][0] * M.m[1][0] + M.m[0][1] * M.m[1][1] + M.m[0][2] * M.m[1][2]),
-		4.0f * (M.m[0][0] * M.m[2][0] + M.m[0][1] * M.m[2][1] + M.m[0][2] * M.m[2][2]),
-		4.0f * (M.m[1][0] * M.m[1][0] + M.m[1][1] * M.m[1][1] + M.m[1][2] * M.m[1][2]),
-		4.0f * (M.m[1][0] * M.m[2][0] + M.m[1][1] * M.m[2][1] + M.m[1][2] * M.m[2][2]),
-		4.0f * (M.m[2][0] * M.m[2][0] + M.m[2][1] * M.m[2][1] + M.m[2][2] * M.m[2][2])
-	};
-
-	QMmat3 cov = {{
-		{ sigma[0], sigma[1], sigma[2] },
-		{ sigma[1], sigma[3], sigma[4] },
-		{ sigma[2], sigma[4], sigma[5] }
-	}};
+	//TODO: add mat3 scale and rot functions to QM so we dont need to do a top_left
+	QMmat3 M = qm_mat4_top_left(qm_mat4_mult(scaleMat, rotMat));
+	QMmat3 cov = qm_mat3_mult(qm_mat3_transpose(M), M);
 
 	//project covariance matrix to 2D:
 	//---------------
@@ -232,11 +220,11 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 
 	//compute inverse 2d covariance:
 	//---------------
-	float det = cov2d.m[0][0] * cov2d.m[1][1] - cov2d.m[0][1] * cov2d.m[1][0];
+	float det = cov2d.m[0][0] * cov2d.m[1][1] - cov2d.m[0][1] * cov2d.m[0][1];
 	if(det == 0.0f)
 		return;
 
-	QMvec3 conic = qm_vec3_scale((QMvec3){ cov2d.m[1][1], -cov2d.m[1][0], cov2d.m[0][0]}, 1.0f / det);
+	QMvec3 conic = qm_vec3_scale((QMvec3){ cov2d.m[1][1], -cov2d.m[0][1], cov2d.m[0][0] }, 1.0f / det);
 
 	//compute eigenvalues:
 	//---------------
@@ -252,8 +240,8 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	//compute image tiles:
 	//---------------
 	QMvec2 pixCenter = {
-		((clipPos.x + 1.0f) * 0.5f * width ) - 0.5f,
-		((clipPos.y + 1.0f) * 0.5f * height) - 0.5f
+		((clipPos.x / clipPos.w + 1.0f) * 0.5f * width ) - 0.5f,
+		((clipPos.y / clipPos.w + 1.0f) * 0.5f * height) - 0.5f
 	};
 
 	//TODO: tweak
