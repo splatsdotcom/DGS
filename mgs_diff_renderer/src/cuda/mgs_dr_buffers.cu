@@ -48,4 +48,6 @@ MGSDRimageBuffers::MGSDRimageBuffers(uint8_t* mem, uint32_t count) :
 {
 	//TODO: this is wasteful! only need 1 per tile, can also get away with just a uint32_t
 	tileRanges = bump<uint2>();
+	accumAlpha = bump<float>();
+	numContributors = bump<uint32_t>();
 }

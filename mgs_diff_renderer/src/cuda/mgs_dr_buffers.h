@@ -95,6 +95,8 @@ public:
 	MGSDRimageBuffers(uint8_t* mem, uint32_t count);
 
 	uint2* tileRanges;
+	float* accumAlpha;
+	uint32_t* numContributors;
 };
 
 #endif //#ifndef MGS_DR_BUFFERS_H

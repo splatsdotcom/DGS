@@ -99,7 +99,7 @@ def main():
 		img = y.detach().cpu().clamp(0, 1)
 		img = (img * 255).byte().numpy()
 		frame_path = os.path.join(out_dir, f"frame_{i:04d}.png")
-		Image.fromarray(img, mode="RGBA").save(frame_path)
+		Image.fromarray(img, mode="RGB").save(frame_path)
 		frames.append(img)
 		print(f"Frame {i+1}/{num_frames} saved")
 

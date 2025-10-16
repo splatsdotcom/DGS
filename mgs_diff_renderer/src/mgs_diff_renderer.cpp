@@ -32,7 +32,7 @@ at::Tensor mgs_dr_forward(int64_t outWidth, int64_t outHeight, const at::Tensor&
 	torch::TensorOptions byteOpts(torch::kByte);
 	torch::Device device(torch::kCUDA);
 
-	at::Tensor outImage = torch::full({ outHeight, outWidth, 4 }, 0.0f, floatOpts.device(device));
+	at::Tensor outImage = torch::full({ outHeight, outWidth, 3 }, 0.0f, floatOpts.device(device));
 
 	at::Tensor geomBuf    = torch::empty({0}, byteOpts.device(device));
 	at::Tensor binningBuf = torch::empty({0}, byteOpts.device(device));

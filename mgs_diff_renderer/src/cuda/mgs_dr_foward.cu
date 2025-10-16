@@ -50,7 +50,7 @@ _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* ke
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
 _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
                              const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
-                             float* outColor);
+                             float* outColor, float* outAccumAlpha, uint32_t* outNumContributors);
 
 __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, QMvec2 pixCenter, float pixRadius, uint2& tileMin, uint2& tileMax);
 
@@ -191,7 +191,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	_mgs_dr_forward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
 		outWidth, outHeight,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs.pixCenters, geomBufs.conic, geomBufs.rgb,
-		outImg
+		outImg, imageBufs.accumAlpha, imageBufs.numContributors
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
@@ -403,7 +403,7 @@ _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* ke
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN)
 _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
                              const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
-                             float* outColor)
+                             float* outColor, float* outAccumAlpha, uint32_t* outNumContributors)
 {
 	//compute pixel position:
 	//---------------
@@ -442,6 +442,9 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height,
 	float accumAlpha = 1.0f;
 	QMvec3 accumColor = qm_vec3_full(0.0f);
 
+	uint32_t numContributors = 0;
+	uint32_t lastContributor = 0;
+
 	for(uint32_t i = 0; i < numRounds; i++)
 	{
 		//exit early if all threads done
@@ -464,6 +467,8 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height,
 		//accumulate collected gaussians
 		for(uint32_t j = 0; j < min(MGS_DR_TILE_LEN, numToRender); j++)
 		{
+			numContributors++;
+
 			float2 pos = collectedPixCenters[j];
 			float4 conic = collectedConic[j];
 
@@ -487,6 +492,8 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height,
 
 			accumColor = qm_vec3_add(accumColor, qm_vec3_scale(collectedRGB[j], alpha * accumAlpha));
 			accumAlpha = newAccumAlpha;
+
+			lastContributor = numContributors;
 		}
 
 		//decrement num left to render
@@ -497,11 +504,12 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height,
 	//---------------
 	if(inside)
 	{
-		uint32_t writeIdx = pixelId * 4;
-		outColor[writeIdx + 0] = accumColor.r;
-		outColor[writeIdx + 1] = accumColor.g;
-		outColor[writeIdx + 2] = accumColor.b;
-		outColor[writeIdx + 3] = 1.0f;// - accumAlpha;
+		outColor[pixelId * 3 + 0] = accumColor.r;
+		outColor[pixelId * 3 + 1] = accumColor.g;
+		outColor[pixelId * 3 + 2] = accumColor.b;
+
+		outAccumAlpha[pixelId] = accumAlpha;
+		outNumContributors[pixelId] = lastContributor;
 	}
 }
 
