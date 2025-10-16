@@ -1,11 +1,7 @@
 import torch
-from PIL import Image
 import math
+from PIL import Image
 import mgs_diff_renderer
-import numpy as np
-from plyfile import PlyData
-import imageio.v2 as imageio
-import os
 
 def look_at(eye, target, up):
 	f = (target - eye)
@@ -33,81 +29,45 @@ def perspective(fovy, aspect, znear, zfar):
 	m[3, 2] = -1.0
 	return m.T
 
-def load_ply_data(path, device='cuda'):
-	print(f"📂 Loading PLY from {path} ...")
-	plydata = PlyData.read(path)
-	vertex = plydata['vertex'].data
-
-	# Convert structured array → torch tensors
-	def np_to_torch(name, dim=1):
-		arr = np.stack([vertex[n] for n in name], axis=-1) if isinstance(name, (list, tuple)) else vertex[name]
-		return torch.tensor(arr, dtype=torch.float32, device=device)
-
-	means = np_to_torch(['x', 'y', 'z'])
-	colors = 0.5 + np_to_torch(['f_dc_0', 'f_dc_1', 'f_dc_2']) * 0.28209479177387814
-	opacities = torch.sigmoid(np_to_torch('opacity').unsqueeze(1))
-	scales = torch.exp(np_to_torch(['scale_0', 'scale_1', 'scale_2']))
-	rotations = np_to_torch(['rot_1', 'rot_2', 'rot_3', 'rot_0'])
-
-	numGaussians = means.shape[0]
-	print(f"✅ Loaded {numGaussians} Gaussians")
-
-	# Placeholder harmonics
-	harmonics = torch.zeros((numGaussians, 15, 3), dtype=torch.float32, device=device)
-
-	return means, scales, rotations, opacities, colors, harmonics
-
-
 def main():
 	torch.set_default_device('cuda')
 
-	width, height = 1920, 1080  # smaller for faster animation
+	width, height = 320, 180  # smaller for testing
 	aspect = width / height
 
-	# --- Camera setup ---
-	start_eye = torch.tensor([1.0 + 0.1, 0.0, 5.0])
-	end_eye   = torch.tensor([-1.0 + 0.1, 0.0, -5.0])
+	eye = torch.tensor([0.0, 0.0, 3.0])
 	target = torch.tensor([0.0, 0.0, 0.0])
 	up = torch.tensor([0.0, 1.0, 0.0])
+	view = look_at(eye, target, up)
 
 	fovy = math.radians(60)
-	proj = perspective(fovy, aspect, 0.1, 1000.0)
-	focalY = height / (2 * math.tan(fovy / 2))
-	focalX = focalY
+	proj = perspective(fovy, aspect, 0.1, 100.0)
+	focalX = width / (2 * math.tan(fovy / 2))
+	focalY = focalX
 
-	# --- Load data ---
-	ply_path = "test.ply"
-	means, scales, rotations, opacities, colors, harmonics = load_ply_data(ply_path)
+	means = torch.tensor([[0.25, 0.0, 0.0],
+						  [-0.25, 0.1, 0.1]],
+						 dtype=torch.float32, device='cuda', requires_grad=True)
+	scales = torch.tensor([[0.2, 0.02, 0.02],
+						   [0.3, 0.1, 0.1]], dtype=torch.float32, device='cuda')
+	rotations = torch.tensor([[0.0, 0.0, 0.0, 1.0],
+							  [0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')
+	opacities = torch.tensor([[1.0], [1.0]], dtype=torch.float32, device='cuda')
+	colors = torch.tensor([[0.0, 1.0, 0.0],
+						   [0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')
+	harmonics = torch.zeros((2, 15, 3), dtype=torch.float32, device='cuda')
 
-	# --- Animation settings ---
-	num_frames = 60
-	out_dir = "frames"
-	os.makedirs(out_dir, exist_ok=True)
-	print(f"🎬 Rendering {num_frames} frames ...")
+	y = mgs_diff_renderer.render(width, height, view, proj, focalX, focalY,
+								 means, scales, rotations, opacities, colors, harmonics)
 
-	frames = []
-	for i in range(num_frames):
-		t = i / (num_frames - 1)
-		eye = (1 - t) * start_eye + t * end_eye
-		view = look_at(eye, target, up)
+	# Define a simple differentiable loss
+	loss = y.mean()
 
-		y = mgs_diff_renderer.render(
-			width, height, view, proj, focalX, focalY,
-			means, scales, rotations, opacities, colors, harmonics
-		)
+	# Run backward pass
+	loss.backward()
 
-		img = y.detach().cpu().clamp(0, 1)
-		img = (img * 255).byte().numpy()
-		frame_path = os.path.join(out_dir, f"frame_{i:04d}.png")
-		Image.fromarray(img, mode="RGB").save(frame_path)
-		frames.append(img)
-		print(f"Frame {i+1}/{num_frames} saved")
-
-	# --- Write video ---
-	video_path = "zoom_in.mp4"
-	print(f"🎞️ Writing video to {video_path} ...")
-	imageio.mimsave(video_path, frames, fps=15)
-	print("✅ Done! Saved zoom_in.mp4")
+	print("✅ Backward pass completed")
+	print("Gradient on means:\n", means.grad)
 
 if __name__ == "__main__":
 	main()
