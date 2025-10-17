@@ -21,16 +21,9 @@ namespace cg = cooperative_groups;
 
 //TODO: tweak these!
 
-#define MGS_DR_TILE_SIZE 16
-#define MGS_DR_TILE_LEN (MGS_DR_TILE_SIZE * MGS_DR_TILE_SIZE)
-
 #define MGS_DR_PREPROCESS_WORKGROUP_SIZE       64
 #define MGS_DR_KEY_WRITE_WORKGROUP_SIZE        64
 #define MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE 64
-
-#define MGS_DR_MAX_ALPHA 0.99f
-#define MGS_DR_MIN_ALPHA (1.0f / 255.0f)
-#define MGS_DR_ACCUM_ALPHA_CUTOFF 0.00001f
 
 //-------------------------------------------//
 
@@ -53,11 +46,6 @@ _mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height,
                              float* outColor, float* outAccumAlpha, uint32_t* outNumContributors);
 
 __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, QMvec2 pixCenter, float pixRadius, uint2& tileMin, uint2& tileMax);
-
-__device__ __host__ static __forceinline__ uint32_t _mgs_ceildivide32(uint32_t a, uint32_t b)
-{
-	return (a + b - 1) / b;
-}
 
 //-------------------------------------------//
 

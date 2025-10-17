@@ -17,15 +17,8 @@ class _RenderFunction(torch.autograd.Function):
 			debug
 		)
 
-		print(geomBufs)
-		print(binningBufs)
-		print(imageBufs)
-		print()
-
 		# TODO: wrap into a single params struct
 		ctx.numRendered = numRendered
-		ctx.width = outWidth
-		ctx.height = outHeight
 		ctx.focalX = focalX
 		ctx.focalY = focalY
 		ctx.debug = debug
@@ -43,9 +36,9 @@ class _RenderFunction(torch.autograd.Function):
 		view, proj, means, scales, rotations, opacities, colors, harmonics, geomBufs, binningBufs, imageBufs = ctx.saved_tensors
 
 		dMean, dScales, dRotations, dOpacities, dColors, dHarmonics = torch.ops.mgs_diff_renderer.backward(
-			ctx.width, ctx.height, view, proj, ctx.focalX, ctx.focalY,
+			grad_output, view, proj, ctx.focalX, ctx.focalY,
 			means, scales, rotations, opacities, colors, harmonics,
-			geomBufs, binningBufs, imageBufs,
+			ctx.numRendered, geomBufs, binningBufs, imageBufs,
 			ctx.debug
 		)
 

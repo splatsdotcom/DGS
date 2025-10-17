@@ -61,10 +61,17 @@ def main():
 								 means, scales, rotations, opacities, colors, harmonics)
 
 	# Define a simple differentiable loss
-	loss = y.mean()
+	target = torch.zeros_like(y)
+	target[..., 2] = 1.0  # pure blue target
+	loss = torch.nn.functional.mse_loss(y, target)
+	print(loss)
 
 	# Run backward pass
 	loss.backward()
+
+	img = y.detach().cpu().clamp(0, 1) 
+	img = (img * 255).byte().numpy() 
+	Image.fromarray(img, mode="RGB").save('output.png')
 
 	print("✅ Backward pass completed")
 	print("Gradient on means:\n", means.grad)
