@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import math
 from PIL import Image
 import mgs_diff_renderer
@@ -29,10 +30,51 @@ def perspective(fovy, aspect, znear, zfar):
 	m[3, 2] = -1.0
 	return m.T
 
+def finite_difference_gradcheck(func, loss_func, inputs, eps=1e-3, atol=1e-3, rtol=1e-2):
+	# Compute analytical grads
+	for inp in inputs:
+		inp.grad = None
+	
+	out = func(*inputs)
+	loss = loss_func(out)
+	loss.backward()
+
+	print("Analytical gradients:")
+	for i, inp in enumerate(inputs):
+		print(f"  Input {i}: grad norm = {inp.grad.norm().item():.6f}")
+
+	# Finite-difference check
+	for i, inp in enumerate(inputs):
+		grad_fd = torch.zeros_like(inp)
+		for idx in np.ndindex(inp.shape):
+			# clone all inputs to avoid in-place modification
+			perturbed = [x.detach().clone() for x in inputs]
+			perturbed[i][idx] += eps
+			y1 = loss_func(func(*perturbed)).item()
+
+			perturbed = [x.detach().clone() for x in inputs]
+			perturbed[i][idx] -= eps
+			y2 = loss_func(func(*perturbed)).item()
+
+			grad_fd[idx] = (y1 - y2) / (2 * eps)
+
+		diff = (grad_fd - inp.grad).abs()
+		rel_err = diff / (inp.grad.abs() + 1e-8)
+		print(f"Input {i}: max abs diff = {diff.max():.6f}, max rel err = {rel_err.max():.6f}")
+
+		if torch.any(rel_err > rtol) and torch.any(diff > atol):
+			print("❌ Grad check failed for input", i)
+			print("FD GRADS: ", grad_fd)
+			print("ANALYTICAL GRADS: ", inp.grad)
+			print("DIFFS: ", diff)
+			print("RELATIVE ERROR: ", rel_err)
+		else:
+			print("✅ Grad check passed for input", i)
+
 def main():
 	torch.set_default_device('cuda')
 
-	width, height = 320, 180  # smaller for testing
+	width, height = 1920, 1080  # smaller for testing
 	aspect = width / height
 
 	eye = torch.tensor([0.0, 0.0, 3.0])
@@ -79,6 +121,21 @@ def main():
 	print("Gradient on opacities:\n", opacities.grad)
 	print("Gradient on rotations:\n", rotations.grad)
 	print("Gradient on colors:\n", colors.grad)
+
+	def func(means, scales, rotations, opacities, colors, harmonics):
+
+		rotations_norm = rotations / torch.norm(rotations, dim=-1, keepdim=True).clamp(min=1e-8)
+		return mgs_diff_renderer.render(
+			1920, 1080, view, proj, focalX, focalY,
+			means, scales, rotations_norm, opacities, colors, harmonics
+		)
+
+	def loss_func(out):
+		target = torch.zeros_like(out)
+		target[..., 2] = 1.0  # pure blue target
+		return torch.nn.functional.mse_loss(out, target)		
+
+	finite_difference_gradcheck(func, loss_func, [means, scales, rotations, opacities, colors, harmonics])
 
 if __name__ == "__main__":
 	main()

@@ -392,17 +392,13 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	QMmat3 rotMat = qm_mat4_top_left(qm_quaternion_to_mat4(rot));
 
 	QMmat3 M = qm_mat3_mult(scaleMat, rotMat);
-
-	QMmat3 dLdSigma = {{
-		{ dLdCov.m00, 0.5f * dLdCov.m01, 0.5f * dLdCov.m02 },
-		{ 0.5f * dLdCov.m01, dLdCov.m11, 0.5f * dLdCov.m12 },
-		{ 0.5f * dLdCov.m02, 0.5f * dLdCov.m12, dLdCov.m22 }
-	}};
-
-	QMmat3 dLdM = qm_mat3_mult(M, dLdSigma);
-	for(uint32_t i = 0; i < 3; i++)
-	for(uint32_t j = 0; j < 3; j++)
-		dLdM.m[i][j] *= 2.0f;
+	QMmat3 dLdM = qm_mat3_mult(
+		M, (QMmat3){{
+			{ 2.0f * dLdCov.m00,        dLdCov.m01,        dLdCov.m02 },
+			{        dLdCov.m01, 2.0f * dLdCov.m11,        dLdCov.m12 },
+			{        dLdCov.m02,        dLdCov.m12, 2.0f * dLdCov.m22 }
+		}}
+	);
 
 	QMmat3 rotMatT = qm_mat3_transpose(rotMat);
 	QMmat3 dLdMT = qm_mat3_transpose(dLdM);
@@ -414,12 +410,12 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	};
 
 	for(uint32_t i = 0; i < 3; i++)
-		dLdM.v[i] = qm_vec3_scale(dLdM.v[i], scale.v[i]);
+		dLdMT.v[i] = qm_vec3_scale(dLdMT.v[i], scale.v[i]);
 
 	QMquaternion dLdRot;
 	dLdRot.x = 2.0f * rot.y * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.z * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.w * (dLdMT.m[1][2] - dLdMT.m[2][1]) - 4.0f * rot.x * (dLdMT.m[2][2] + dLdMT.m[1][1]);
 	dLdRot.y = 2.0f * rot.x * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.w * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.z * (dLdMT.m[1][2] + dLdMT.m[2][1]) - 4.0f * rot.y * (dLdMT.m[2][2] + dLdMT.m[0][0]);
-	dLdRot.z = 2.0f * rot.w * (dLdMT.m[0][1] - dLdMT.m[1][0]) + 2.0f * rot.x * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.y * (dLdMT.m[1][2] + dLdMT.m[2][1]) - 4.0f * rot.z * (dLdMT.m[1][1] + dLdMT.m[0][0]);
+	dLdRot.z = 2.0f * rot.w * (dLdMT.m[1][0] - dLdMT.m[0][1]) + 2.0f * rot.x * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.y * (dLdMT.m[2][1] + dLdMT.m[1][2]) - 4.0f * rot.z * (dLdMT.m[0][0] + dLdMT.m[1][1]);
 	dLdRot.w = 2.0f * rot.z * (dLdMT.m[0][1] - dLdMT.m[1][0]) + 2.0f * rot.y * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.x * (dLdMT.m[1][2] - dLdMT.m[2][1]);
 
 	//compute gradients w.r.t. harmonics:
