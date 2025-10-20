@@ -23,14 +23,14 @@ namespace cg = cooperative_groups;
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
 _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
                               const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
-                              float2* outDLdPixCenters, float4* outDLdConic, float3* outDLdRGB);
+                              float2* outDLdPixCenters, float3* outDLdConic, float* outDLdOpacities, float3* outDLdRGB);
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
                                    uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
 								   const MGSDRcov3D* covs, const float* pixRadii,
-								   const float2* dLdPixCenters, const float4* dLdConics,
-                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics);
+								   const float2* dLdPixCenters, const float3* dLdConics, const float3* dLdRGB,
+                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics);
 
 //-------------------------------------------//
 
@@ -52,36 +52,24 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 	//allocate memory for intermediate derivatives:
 	//---------------
 	float2* dLdPixCenters = NULL;
-	float4* dLdConic = NULL;
+	float3* dLdConic = NULL;
 	float3* dLdRGB = NULL;
 
 	cudaMalloc(&dLdPixCenters, numGaussians * sizeof(float2)); //TODO: error checking
-	cudaMalloc(&dLdConic     , numGaussians * sizeof(float4));
+	cudaMalloc(&dLdConic     , numGaussians * sizeof(float3));
 	cudaMalloc(&dLdRGB       , numGaussians * sizeof(float3));
 
 	cudaMemset(dLdPixCenters, 0, numGaussians * sizeof(float2));
-	cudaMemset(dLdConic     , 0, numGaussians * sizeof(float4));
-	cudaMemset(dLdRGB       , 0, numGaussians * sizeof(float2));
+	cudaMemset(dLdConic     , 0, numGaussians * sizeof(float3));
+	cudaMemset(dLdRGB       , 0, numGaussians * sizeof(float3));
 	
 	//backward render:
 	//---------------
 	_mgs_dr_backward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
 		width, height, dLdImage, imageBufs.accumAlpha, imageBufs.numContributors,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs.pixCenters, geomBufs.conic, geomBufs.rgb,
-		dLdPixCenters, dLdConic, dLdRGB
+		dLdPixCenters, dLdConic, outDLdOpacities, dLdRGB
 	);
-
-	float2 pixCenters[2];
-	float4 conic[2];
-	float3 rgb[2];
-
-	cudaMemcpy(pixCenters, dLdPixCenters, sizeof(pixCenters), cudaMemcpyDeviceToHost);
-	cudaMemcpy(conic, dLdConic, sizeof(conic), cudaMemcpyDeviceToHost);
-	cudaMemcpy(rgb, dLdRGB, sizeof(rgb), cudaMemcpyDeviceToHost);
-
-	printf("dL / dPixCenters: [(%f, %f), (%f, %f)]\n", pixCenters[0].x, pixCenters[0].y, pixCenters[1].x, pixCenters[1].y);
-	printf("dL / dConic: [(%f, %f, %f, %f), (%f, %f, %f, %f)]\n", conic[0].x, conic[0].y, conic[0].z, conic[0].w, conic[1].x, conic[1].y, conic[1].z, conic[1].w);
-	printf("dL / dRGB: [(%f, %f, %f), (%f, %f, %f)]\n", rgb[0].x, rgb[0].y, rgb[0].z, rgb[1].x, rgb[1].y, rgb[1].z);
 
 	//backward preprocess:
 	//---------------
@@ -90,13 +78,9 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 		width, height, view, proj, focalX, focalY,
 		numGaussians, means, scales, rotations, opacities, colors, harmonics,
 		geomBufs.covs, geomBufs.pixRadii,
-		dLdPixCenters, dLdConic,
-		outDLdMeans, outDLdScales, outDLdRotations, outDLdOpacities, outDLdColors, outDLdHarmonics
+		dLdPixCenters, dLdConic, dLdRGB,
+		outDLdMeans, outDLdScales, outDLdRotations, outDLdColors, outDLdHarmonics
 	);
-
-	float3 meansTest[2];
-	cudaMemcpy(meansTest, outDLdMeans, sizeof(meansTest), cudaMemcpyDeviceToHost);
-	printf("dL / dMeans: [(%f, %f, %f), (%f, %f, %f)]\n", meansTest[0].x, meansTest[0].y, meansTest[0].z, meansTest[1].x, meansTest[1].y, meansTest[1].z);
 
 	//cleanup:
 	//---------------
@@ -110,7 +94,7 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
 _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
                               const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
-                              float2* outDLdPixCenters, float4* outDLdConic, float3* outDLdColor)
+                              float2* outDLdPixCenters, float3* outDLdConic, float* outDLdOpacities, float3* outDLdColor)
 {
 	//compute pixel position:
 	//---------------
@@ -253,7 +237,7 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 			atomicAdd(&outDLdConic[idx].y, dLdG * dGdConic.y);
 			atomicAdd(&outDLdConic[idx].z, dLdG * dGdConic.z);
 
-			atomicAdd(&outDLdConic[idx].w, dLdAlpha * G); //opacity
+			atomicAdd(&outDLdOpacities[idx], dLdAlpha * G); //opacity
 		}
 
 		//decrement num left to render
@@ -265,16 +249,12 @@ __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
                                    uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
                                    const MGSDRcov3D* covs, const float* pixRadii,
-								   const float2* dLdPixCenters, const float4* dLdConics,
-                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics)
+								   const float2* dLdPixCenters, const float3* dLdConics, const float3* dLdRGBs,
+                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if(idx >= numGaussians || pixRadii[idx] <= 0.0f)
 		return;
-
-	//read existing gradients:
-	//---------------
-	float4 dLdConic = dLdConics[idx];
 
 	//find view + clip pos:
 	//---------------
@@ -316,6 +296,8 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 
 	//compute gradients w.r.t. covariance:
 	//---------------
+	float3 dLdConic = dLdConics[idx];
+
 	float a = cov2d.m[0][0]; 
 	float b = cov2d.m[0][1];
 	float c = cov2d.m[1][1];
@@ -401,9 +383,54 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 		dLdMeanScreenspace.z + dLdMeanJ.z
 	};
 
+	//compute gradients w.r.t. scale and rotation:
+	//---------------
+	QMvec3 scale = qm_vec3_load(&scales[idx * 3]);
+	QMquaternion rot = qm_quaternion_load(&rotations[idx * 4]);
+
+	QMmat3 scaleMat = qm_mat4_top_left(qm_mat4_scale(scale));
+	QMmat3 rotMat = qm_mat4_top_left(qm_quaternion_to_mat4(rot));
+
+	QMmat3 M = qm_mat3_mult(scaleMat, rotMat);
+
+	QMmat3 dLdSigma = {{
+		{ dLdCov.m00, 0.5f * dLdCov.m01, 0.5f * dLdCov.m02 },
+		{ 0.5f * dLdCov.m01, dLdCov.m11, 0.5f * dLdCov.m12 },
+		{ 0.5f * dLdCov.m02, 0.5f * dLdCov.m12, dLdCov.m22 }
+	}};
+
+	QMmat3 dLdM = qm_mat3_mult(M, dLdSigma);
+	for(uint32_t i = 0; i < 3; i++)
+	for(uint32_t j = 0; j < 3; j++)
+		dLdM.m[i][j] *= 2.0f;
+
+	QMmat3 rotMatT = qm_mat3_transpose(rotMat);
+	QMmat3 dLdMT = qm_mat3_transpose(dLdM);
+
+	QMvec3 dLdScale = {
+		qm_vec3_dot(rotMatT.v[0], dLdMT.v[0]),
+		qm_vec3_dot(rotMatT.v[1], dLdMT.v[1]),
+		qm_vec3_dot(rotMatT.v[2], dLdMT.v[2])
+	};
+
+	for(uint32_t i = 0; i < 3; i++)
+		dLdM.v[i] = qm_vec3_scale(dLdM.v[i], scale.v[i]);
+
+	QMquaternion dLdRot;
+	dLdRot.x = 2.0f * rot.y * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.z * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.w * (dLdMT.m[1][2] - dLdMT.m[2][1]) - 4.0f * rot.x * (dLdMT.m[2][2] + dLdMT.m[1][1]);
+	dLdRot.y = 2.0f * rot.x * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.w * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.z * (dLdMT.m[1][2] + dLdMT.m[2][1]) - 4.0f * rot.y * (dLdMT.m[2][2] + dLdMT.m[0][0]);
+	dLdRot.z = 2.0f * rot.w * (dLdMT.m[0][1] - dLdMT.m[1][0]) + 2.0f * rot.x * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.y * (dLdMT.m[1][2] + dLdMT.m[2][1]) - 4.0f * rot.z * (dLdMT.m[1][1] + dLdMT.m[0][0]);
+	dLdRot.w = 2.0f * rot.z * (dLdMT.m[0][1] - dLdMT.m[1][0]) + 2.0f * rot.y * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.x * (dLdMT.m[1][2] - dLdMT.m[2][1]);
+
+	//compute gradients w.r.t. harmonics:
+	//---------------
+	QMvec3 dLdRGB = qm_vec3_load((float*)&dLdRGBs[idx]);
+	QMvec3 dLdColor = dLdRGB;
+
 	//write out:
 	//---------------
-	outDLdMeans[idx * 3 + 0] = dLdMean.x;
-	outDLdMeans[idx * 3 + 1] = dLdMean.y;
-	outDLdMeans[idx * 3 + 2] = dLdMean.z;
+	qm_vec3_store(dLdMean, &outDLdMeans[idx * 3]);
+	qm_vec3_store(dLdScale, &outDLdScales[idx * 3]);
+	qm_quaternion_store(dLdRot, &outDLdRotations[idx * 4]);
+	qm_vec3_store(dLdColor, &outDLdColors[idx * 3]);
 }

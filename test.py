@@ -49,13 +49,13 @@ def main():
 						  [-0.25, 0.1, 0.1]],
 						 dtype=torch.float32, device='cuda', requires_grad=True)
 	scales = torch.tensor([[0.2, 0.02, 0.02],
-						   [0.3, 0.1, 0.1]], dtype=torch.float32, device='cuda')
+						   [0.3, 0.1, 0.1]], dtype=torch.float32, device='cuda', requires_grad=True)
 	rotations = torch.tensor([[0.0, 0.0, 0.0, 1.0],
-							  [0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')
-	opacities = torch.tensor([[1.0], [1.0]], dtype=torch.float32, device='cuda')
+							  [0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
+	opacities = torch.tensor([[1.0], [1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
 	colors = torch.tensor([[0.0, 1.0, 0.0],
-						   [0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda')
-	harmonics = torch.zeros((2, 15, 3), dtype=torch.float32, device='cuda')
+						   [0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
+	harmonics = torch.zeros((2, 15, 3), dtype=torch.float32, device='cuda', requires_grad=True)
 
 	y = mgs_diff_renderer.render(width, height, view, proj, focalX, focalY,
 								 means, scales, rotations, opacities, colors, harmonics)
@@ -75,6 +75,10 @@ def main():
 
 	print("✅ Backward pass completed")
 	print("Gradient on means:\n", means.grad)
+	print("Gradient on scales:\n", scales.grad)
+	print("Gradient on opacities:\n", opacities.grad)
+	print("Gradient on rotations:\n", rotations.grad)
+	print("Gradient on colors:\n", colors.grad)
 
 if __name__ == "__main__":
 	main()
