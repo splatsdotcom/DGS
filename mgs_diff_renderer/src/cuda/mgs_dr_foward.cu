@@ -30,7 +30,7 @@ namespace cg = cooperative_groups;
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
                                  uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB);
+                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, MGSDRcov3D* outCovs, float4* outConic, float3* outRGB);
 
 __global__ static void __launch_bounds__(MGS_DR_KEY_WRITE_WORKGROUP_SIZE)
 _mgs_dr_forward_write_keys_kernel(uint32_t width, uint32_t height,
@@ -88,7 +88,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	_mgs_dr_foward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
 		outWidth, outHeight, view, proj, focalX, focalY,
 		numGaussians, means, scales, rotations, opacities, colors, harmonics,
-		geomBufs.pixCenters, geomBufs.pixRadii, geomBufs.depths, geomBufs.tilesTouched, geomBufs.conic, geomBufs.rgb
+		geomBufs.pixCenters, geomBufs.pixRadii, geomBufs.depths, geomBufs.tilesTouched, geomBufs.covs, geomBufs.conic, geomBufs.rgb
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
@@ -213,7 +213,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
                                  uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, float4* outConic, float3* outRGB)
+                                 float2* outPixCenters, float* outPixRadii, float* outDepths, uint32_t* outTilesTouched, MGSDRcov3D* outCovs, float4* outConic, float3* outRGB)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if(idx >= numGaussians)
@@ -320,6 +320,7 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	outPixRadii[idx] = pixRadius;
 	outDepths[idx] = camPos.z;
 	outTilesTouched[idx] = (tilesMax.x - tilesMin.x) * (tilesMax.y - tilesMin.y);
+	outCovs[idx] = { cov.m[0][0], cov.m[1][0], cov.m[2][0], cov.m[1][1], cov.m[2][1], cov.m[2][2] };
 	outConic[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
 	outRGB[idx] = { color.x, color.y, color.z };
 }

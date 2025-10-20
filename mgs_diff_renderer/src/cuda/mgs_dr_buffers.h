@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include "mgs_dr_global.h"
 
 //-------------------------------------------//
 
@@ -68,6 +69,7 @@ public:
 	float* depths;
 	uint32_t* tilesTouched;
 	uint32_t* tilesTouchedScan;
+	MGSDRcov3D* covs;
 	float4* conic;
 	float3* rgb;
 

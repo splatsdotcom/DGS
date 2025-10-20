@@ -16,12 +16,20 @@ namespace cg = cooperative_groups;
 
 //-------------------------------------------//
 
+#define MGS_DR_PREPROCESS_WORKGROUP_SIZE 64
+
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
 _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
                               const uint2* ranges, const uint32_t* indices, const float2* pixCenters, const float4* conic, const float3* rgb,
                               float2* outDLdPixCenters, float4* outDLdConic, float3* outDLdRGB);
+
+__global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
+_mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
+                                   uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+								   const MGSDRcov3D* covs, const float* pixRadii,
+                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics);
 
 //-------------------------------------------//
 
@@ -235,5 +243,83 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 
 		//decrement num left to render
 		numToRender -= MGS_DR_TILE_LEN;
+	}
+}
+
+__global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
+_mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
+                                   uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+                                   const MGSDRcov3D* covs, const float* pixRadii,
+								   const float4* dLdConics,
+                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics)
+{
+	auto idx = cg::this_grid().thread_rank();
+	if(idx >= numGaussians || pixRadii[idx] <= 0.0f)
+		return;
+
+	//read existing gradients:
+	//---------------
+	float4 dLdConic = dLdConics[idx];
+
+	//find view pos:
+	//---------------
+	QMmat4 viewMat = qm_mat4_load(view);
+	QMmat4 projMat = qm_mat4_load(proj);
+	
+	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
+
+	QMvec4 camPos = qm_mat4_mult_vec4(
+		viewMat, 
+		(QMvec4){ mean.x, mean.y, mean.z, 1.0f }
+	);
+
+	//project covariance matrix to 2D:
+	//---------------
+	QMmat3 cov = {{
+		{ covs[idx].m00, covs[idx].m01, covs[idx].m02 },
+		{ covs[idx].m10, covs[idx].m11, covs[idx].m12 },
+		{ covs[idx].m02, covs[idx].m12, covs[idx].m22 }
+	}};
+	
+	QMmat3 J = {{
+		{ -focalX / camPos.z, 0.0,                 (focalX * camPos.x) / (camPos.z * camPos.z) },
+		{ 0.0,                -focalY / camPos.z,  (focalY * camPos.y) / (camPos.z * camPos.z) },
+		{ 0.0,                0.0,                 0.0                                         }
+	}};
+
+	QMmat3 T = qm_mat3_mult(
+		qm_mat3_transpose(qm_mat4_top_left(viewMat)),
+		J
+	);
+
+	QMmat3 cov2d = qm_mat3_mult(
+		qm_mat3_transpose(T),
+		qm_mat3_mult(cov, T)
+	);
+
+	//compute gradients w.r.t. covariance:
+	//---------------
+	float a = cov2d.m[0][0]; 
+	float b = cov2d.m[0][1];
+	float c = cov2d.m[1][1];
+
+	float det = a * c - b * b;
+
+	float dLdA, dLdB, dLdC;
+	MGSDRcov3D dLdCov;
+	if(det != 0.0f)
+	{
+		float det2Inv = 1.0f / (det * det);
+		dLdA =        det2Inv * (-c * c * dLdConic.x + b * c * dLdConic.y + (det -        a * c) * dLdConic.z);
+		dLdC =        det2Inv * (-a * a * dLdConic.z + b * a * dLdConic.y + (det -        a * x) * dLdConic.x);
+		dLdB = 2.0f * det2Inv * ( b * c * dLdConic.x + a * b * dLdConic.z + (det + 2.0f * b * b) * dLdConic.y);
+
+		// dLdCov.m00 = 
+	}
+	else
+	{
+		dLdA = 0.0f;
+		dLdC = 0.0f;
+		dLdB = 0.0f;
 	}
 }

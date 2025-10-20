@@ -23,6 +23,7 @@ MGSDRgeomBuffers::MGSDRgeomBuffers(uint8_t* mem, uint32_t count) :
 	pixRadii         = bump<float>();
 	depths           = bump<float>();
 	tilesTouched     = bump<uint32_t>();
+	covs             = bump<MGSDRcov3D>();
 	conic            = bump<float4>();
 	rgb              = bump<float3>();
 	tilesTouchedScan = bump<uint32_t>();

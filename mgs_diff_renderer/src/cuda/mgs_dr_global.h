@@ -24,6 +24,15 @@
 
 //-------------------------------------------//
 
+struct MGSDRcov3D
+{
+	float m00, m01, m02;
+	float      m11, m12;
+	float           m22;
+};
+
+//-------------------------------------------//
+
 __device__ __host__ static __forceinline__ uint32_t _mgs_ceildivide32(uint32_t a, uint32_t b)
 {
 	return (a + b - 1) / b;
