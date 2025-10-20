@@ -314,12 +314,54 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 		dLdC =        det2Inv * (-a * a * dLdConic.z + b * a * dLdConic.y + (det -        a * x) * dLdConic.x);
 		dLdB = 2.0f * det2Inv * ( b * c * dLdConic.x + a * b * dLdConic.z + (det + 2.0f * b * b) * dLdConic.y);
 
-		// dLdCov.m00 = 
+		dLdCov.m00 = T.m[0][0] * T.m[0][0] * dLdA + T.m[0][0] * T.m[1][0] * dLdB + T.m[1][0] * T.m[1][0] * dLdC;
+		dLdCov.m11 = T.m[0][1] * T.m[0][1] * dLdA + T.m[0][1] * T.m[1][1] * dLdB + T.m[1][1] * T.m[1][1] * dLdC;
+		dLdCov.m22 = T.m[0][2] * T.m[0][2] * dLdA + T.m[0][2] * T.m[1][2] * dLdB + T.m[1][2] * T.m[1][2] * dLdC;
+
+		dLdCov.m01 = 2.0f * T.m[0][0] * T.m[0][1] * dLdA + (T.m[0][0] * T.m[1][1] + T.m[0][1] * T.m[1][0]) * dLdB + 2.0f * T.m[1][0] * T.m[1][1] * dLdC;
+		dLdCov.m02 = 2.0f * T.m[0][0] * T.m[0][2] * dLdA + (T.m[0][0] * T.m[1][2] + T.m[0][2] * T.m[1][0]) * dLdB + 2.0f * T.m[1][0] * T.m[1][2] * dLdC;
+		dLdCov.m12 = 2.0f * T.m[0][2] * T.m[0][1] * dLdA + (T.m[0][1] * T.m[1][2] + T.m[0][2] * T.m[1][1]) * dLdB + 2.0f * T.m[1][1] * T.m[1][2] * dLdC;
 	}
 	else
 	{
 		dLdA = 0.0f;
 		dLdC = 0.0f;
 		dLdB = 0.0f;
+
+		dLdCov = (MGSDRcov3D){0};
 	}
+
+	//compute gradients w.r.t. mean (where the mean affects the jacobian):
+	//---------------
+	float dLdT00 = 2.0f * (T.m[0][0] * cov.m[0][0] + T.m[0][1] * cov.m[0][1] + T.m[0][2] * cov.m[0][2]) * dLdA +
+	                      (T.m[1][0] * cov.m[0][0] + T.m[1][1] * cov.m[0][1] + T.m[1][2] * cov.m[0][2]) * dLdB;
+	float dLdT01 = 2.0f * (T.m[0][0] * cov.m[1][0] + T.m[0][1] * cov.m[1][1] + T.m[0][2] * cov.m[1][2]) * dLdA +
+	                      (T.m[1][0] * cov.m[1][0] + T.m[1][1] * cov.m[1][1] + T.m[1][2] * cov.m[1][2]) * dLdB;
+	float dLdT02 = 2.0f * (T.m[0][0] * cov.m[2][0] + T.m[0][1] * cov.m[2][1] + T.m[0][2] * cov.m[2][2]) * dLdA +
+	                      (T.m[1][0] * cov.m[2][0] + T.m[1][1] * cov.m[2][1] + T.m[1][2] * cov.m[2][2]) * dLdB;
+	float dLdT10 = 2.0f * (T.m[1][0] * cov.m[0][0] + T.m[1][1] * cov.m[0][1] + T.m[1][2] * cov.m[0][2]) * dLdC +
+	                      (T.m[0][0] * cov.m[0][0] + T.m[0][1] * cov.m[0][1] + T.m[0][2] * cov.m[0][2]) * dLdB;
+	float dLdT11 = 2.0f * (T.m[1][0] * cov.m[1][0] + T.m[1][1] * cov.m[1][1] + T.m[1][2] * cov.m[1][2]) * dLdC +
+	                      (T.m[0][0] * cov.m[1][0] + T.m[0][1] * cov.m[1][1] + T.m[0][2] * cov.m[1][2]) * dLdB;
+	float dLdT12 = 2.0f * (T.m[1][0] * cov.m[2][0] + T.m[1][1] * cov.m[2][1] + T.m[1][2] * cov.m[2][2]) * dLdC +
+	                      (T.m[0][0] * cov.m[2][0] + T.m[0][1] * cov.m[2][1] + T.m[0][2] * cov.m[2][2]) * dLdB;
+
+	float dLdJ00 = W.m[0][0] * dLdT00 + W.m[0][1] * dLdT01 + W.m[0][2] * dL_dT02;
+	float dLdJ02 = W.m[2][0] * dLdT00 + W.m[2][1] * dLdT01 + W.m[2][2] * dL_dT02;
+	float dLdJ11 = W.m[1][0] * dLdT10 + W.m[1][1] * dLdT11 + W.m[1][2] * dL_dT12;
+	float dLdJ12 = W.m[2][0] * dLdT10 + W.m[2][1] * dLdT11 + W.m[2][2] * dL_dT12;
+
+	float invCamZ = 1.0f / camPos.z;
+	float invCamZ2 = invCamZ * invCamZ;
+	float invCamZ3 = invCamZ * invCamZ * invCamZ;
+
+	float dLdCamPosX = -focalX * invCamZ2 * dLdJ02;
+	float dLdCamPosY = -focalY * invCamZ2 * dLdJ12;
+	float dLdCamPosZ = -focalX * invCamZ2 * dLdJ00 - focalY * invCamZ2 * dLdJ11 + (2.0f * focalX * camPos.x) * invCamZ3 * dLdJ02 + (2 * focalY * camPos.y) * invCamZ3 * dLdJ12;
+
+	//this is only part of dLdMean (how it affects the jacobian), dLdMean w.r.t. dLdPixCenters will be computed later
+	QMvec3 dLdMean = qm_mat3_mult_vec3(
+		(QMvec3){ (float)dLdCamPosX, (float)dLdCamPosY, (float)dLdCamPosZ }, 
+		qm_mat3_transpose(viewMat)
+	);
 }
