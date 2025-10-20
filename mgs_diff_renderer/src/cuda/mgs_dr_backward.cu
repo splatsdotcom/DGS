@@ -29,6 +29,7 @@ __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
                                    uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
 								   const MGSDRcov3D* covs, const float* pixRadii,
+								   const float2* dLdPixCenters, const float4* dLdConics,
                                    float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics);
 
 //-------------------------------------------//
@@ -43,7 +44,6 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 	//---------------
 	uint32_t tilesWidth  = _mgs_ceildivide32(width , MGS_DR_TILE_SIZE);
 	uint32_t tilesHeight = _mgs_ceildivide32(height, MGS_DR_TILE_SIZE);
-	uint32_t tilesLen = tilesWidth * tilesHeight;
 
 	MGSDRgeomBuffers geomBufs = MGSDRgeomBuffers((uint8_t*)geomBufsMem, numGaussians);
 	MGSDRbinningBuffers binningBufs = MGSDRbinningBuffers((uint8_t*)binningBufsMem, numRendered);
@@ -82,6 +82,21 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 	printf("dL / dPixCenters: [(%f, %f), (%f, %f)]\n", pixCenters[0].x, pixCenters[0].y, pixCenters[1].x, pixCenters[1].y);
 	printf("dL / dConic: [(%f, %f, %f, %f), (%f, %f, %f, %f)]\n", conic[0].x, conic[0].y, conic[0].z, conic[0].w, conic[1].x, conic[1].y, conic[1].z, conic[1].w);
 	printf("dL / dRGB: [(%f, %f, %f), (%f, %f, %f)]\n", rgb[0].x, rgb[0].y, rgb[0].z, rgb[1].x, rgb[1].y, rgb[1].z);
+
+	//backward preprocess:
+	//---------------
+	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
+	_mgs_dr_backward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
+		width, height, view, proj, focalX, focalY,
+		numGaussians, means, scales, rotations, opacities, colors, harmonics,
+		geomBufs.covs, geomBufs.pixRadii,
+		dLdPixCenters, dLdConic,
+		outDLdMeans, outDLdScales, outDLdRotations, outDLdOpacities, outDLdColors, outDLdHarmonics
+	);
+
+	float3 meansTest[2];
+	cudaMemcpy(meansTest, outDLdMeans, sizeof(meansTest), cudaMemcpyDeviceToHost);
+	printf("dL / dMeans: [(%f, %f, %f), (%f, %f, %f)]\n", meansTest[0].x, meansTest[0].y, meansTest[0].z, meansTest[1].x, meansTest[1].y, meansTest[1].z);
 
 	//cleanup:
 	//---------------
@@ -250,7 +265,7 @@ __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
                                    uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
                                    const MGSDRcov3D* covs, const float* pixRadii,
-								   const float4* dLdConics,
+								   const float2* dLdPixCenters, const float4* dLdConics,
                                    float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -261,7 +276,7 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	//---------------
 	float4 dLdConic = dLdConics[idx];
 
-	//find view pos:
+	//find view + clip pos:
 	//---------------
 	QMmat4 viewMat = qm_mat4_load(view);
 	QMmat4 projMat = qm_mat4_load(proj);
@@ -273,11 +288,15 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 		(QMvec4){ mean.x, mean.y, mean.z, 1.0f }
 	);
 
+	QMvec4 clipPos = qm_mat4_mult_vec4(
+		projMat, camPos
+	);
+
 	//project covariance matrix to 2D:
 	//---------------
 	QMmat3 cov = {{
 		{ covs[idx].m00, covs[idx].m01, covs[idx].m02 },
-		{ covs[idx].m10, covs[idx].m11, covs[idx].m12 },
+		{ covs[idx].m01, covs[idx].m11, covs[idx].m12 },
 		{ covs[idx].m02, covs[idx].m12, covs[idx].m22 }
 	}};
 	
@@ -287,10 +306,8 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 		{ 0.0,                0.0,                 0.0                                         }
 	}};
 
-	QMmat3 T = qm_mat3_mult(
-		qm_mat3_transpose(qm_mat4_top_left(viewMat)),
-		J
-	);
+	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(viewMat));
+	QMmat3 T = qm_mat3_mult(W, J);
 
 	QMmat3 cov2d = qm_mat3_mult(
 		qm_mat3_transpose(T),
@@ -311,7 +328,7 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	{
 		float det2Inv = 1.0f / (det * det);
 		dLdA =        det2Inv * (-c * c * dLdConic.x + b * c * dLdConic.y + (det -        a * c) * dLdConic.z);
-		dLdC =        det2Inv * (-a * a * dLdConic.z + b * a * dLdConic.y + (det -        a * x) * dLdConic.x);
+		dLdC =        det2Inv * (-a * a * dLdConic.z + b * a * dLdConic.y + (det -        a * c) * dLdConic.x);
 		dLdB = 2.0f * det2Inv * ( b * c * dLdConic.x + a * b * dLdConic.z + (det + 2.0f * b * b) * dLdConic.y);
 
 		dLdCov.m00 = T.m[0][0] * T.m[0][0] * dLdA + T.m[0][0] * T.m[1][0] * dLdB + T.m[1][0] * T.m[1][0] * dLdC;
@@ -346,22 +363,47 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	float dLdT12 = 2.0f * (T.m[1][0] * cov.m[2][0] + T.m[1][1] * cov.m[2][1] + T.m[1][2] * cov.m[2][2]) * dLdC +
 	                      (T.m[0][0] * cov.m[2][0] + T.m[0][1] * cov.m[2][1] + T.m[0][2] * cov.m[2][2]) * dLdB;
 
-	float dLdJ00 = W.m[0][0] * dLdT00 + W.m[0][1] * dLdT01 + W.m[0][2] * dL_dT02;
-	float dLdJ02 = W.m[2][0] * dLdT00 + W.m[2][1] * dLdT01 + W.m[2][2] * dL_dT02;
-	float dLdJ11 = W.m[1][0] * dLdT10 + W.m[1][1] * dLdT11 + W.m[1][2] * dL_dT12;
-	float dLdJ12 = W.m[2][0] * dLdT10 + W.m[2][1] * dLdT11 + W.m[2][2] * dL_dT12;
+	float dLdJ00 = W.m[0][0] * dLdT00 + W.m[0][1] * dLdT01 + W.m[0][2] * dLdT02;
+	float dLdJ02 = W.m[2][0] * dLdT00 + W.m[2][1] * dLdT01 + W.m[2][2] * dLdT02;
+	float dLdJ11 = W.m[1][0] * dLdT10 + W.m[1][1] * dLdT11 + W.m[1][2] * dLdT12;
+	float dLdJ12 = W.m[2][0] * dLdT10 + W.m[2][1] * dLdT11 + W.m[2][2] * dLdT12;
 
 	float invCamZ = 1.0f / camPos.z;
 	float invCamZ2 = invCamZ * invCamZ;
 	float invCamZ3 = invCamZ * invCamZ * invCamZ;
 
-	float dLdCamPosX = -focalX * invCamZ2 * dLdJ02;
-	float dLdCamPosY = -focalY * invCamZ2 * dLdJ12;
-	float dLdCamPosZ = -focalX * invCamZ2 * dLdJ00 - focalY * invCamZ2 * dLdJ11 + (2.0f * focalX * camPos.x) * invCamZ3 * dLdJ02 + (2 * focalY * camPos.y) * invCamZ3 * dLdJ12;
+	float dLdCamPosX = focalX * invCamZ2 * dLdJ02;
+	float dLdCamPosY = focalY * invCamZ2 * dLdJ12;
+	float dLdCamPosZ = focalX * invCamZ2 * dLdJ00 + focalY * invCamZ2 * dLdJ11 - (2.0f * focalX * camPos.x) * invCamZ3 * dLdJ02 - (2.0f * focalY * camPos.y) * invCamZ3 * dLdJ12;
 
 	//this is only part of dLdMean (how it affects the jacobian), dLdMean w.r.t. dLdPixCenters will be computed later
-	QMvec3 dLdMean = qm_mat3_mult_vec3(
-		(QMvec3){ (float)dLdCamPosX, (float)dLdCamPosY, (float)dLdCamPosZ }, 
-		qm_mat3_transpose(viewMat)
+	QMvec4 dLdMeanJ = qm_mat4_mult_vec4(
+		qm_mat4_transpose(viewMat),
+		(QMvec4){ (float)dLdCamPosX, (float)dLdCamPosY, (float)dLdCamPosZ, 0.0f } 
 	);
+
+	//compute gradients w.r.t. mean (where the mean affects screenspace position):
+	//---------------
+	QMmat4 PV = qm_mat4_mult(projMat, viewMat);
+
+	float clipW = 1.0f / (clipPos.w + 0.000001f);
+	float mul1 = (PV.m[0][0] * mean.x + PV.m[1][0] * mean.y + PV.m[2][0] * mean.z + PV.m[3][0]) * clipW * clipW;
+	float mul2 = (PV.m[0][1] * mean.x + PV.m[1][1] * mean.y + PV.m[2][1] * mean.z + PV.m[3][1]) * clipW * clipW;
+	
+	QMvec3 dLdMeanScreenspace;
+	dLdMeanScreenspace.x = (PV.m[0][0] * clipW - PV.m[0][3] * mul1) * dLdPixCenters[idx].x + (PV.m[0][1] * clipW - PV.m[0][3] * mul2) * dLdPixCenters[idx].y;
+	dLdMeanScreenspace.y = (PV.m[1][4] * clipW - PV.m[1][3] * mul1) * dLdPixCenters[idx].x + (PV.m[1][1] * clipW - PV.m[1][3] * mul2) * dLdPixCenters[idx].y;
+	dLdMeanScreenspace.z = (PV.m[2][0] * clipW - PV.m[2][3] * mul1) * dLdPixCenters[idx].x + (PV.m[2][1] * clipW - PV.m[2][3] * mul2) * dLdPixCenters[idx].y;
+
+	QMvec3 dLdMean = {
+		dLdMeanScreenspace.x + dLdMeanJ.x,
+		dLdMeanScreenspace.y + dLdMeanJ.y,
+		dLdMeanScreenspace.z + dLdMeanJ.z
+	};
+
+	//write out:
+	//---------------
+	outDLdMeans[idx * 3 + 0] = dLdMean.x;
+	outDLdMeans[idx * 3 + 1] = dLdMean.y;
+	outDLdMeans[idx * 3 + 2] = dLdMean.z;
 }
