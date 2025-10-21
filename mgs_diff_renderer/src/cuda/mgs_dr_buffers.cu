@@ -19,13 +19,13 @@ MGSDRrenderBuffers::MGSDRrenderBuffers(uint8_t* mem, uint32_t count) :
 MGSDRgeomBuffers::MGSDRgeomBuffers(uint8_t* mem, uint32_t count) :
 	MGSDRrenderBuffers(mem, count)
 {
-	pixCenters       = bump<float2>();
+	pixCenters       = bump<QMvec2>();
 	pixRadii         = bump<float>();
 	depths           = bump<float>();
 	tilesTouched     = bump<uint32_t>();
 	covs             = bump<MGSDRcov3D>();
-	conic            = bump<float4>();
-	rgb              = bump<float3>();
+	conicOpacity     = bump<QMvec4>();
+	rgb              = bump<QMvec3>();
 	tilesTouchedScan = bump<uint32_t>();
 
 	cub::DeviceScan::InclusiveSum(nullptr, tilesTouchedScanTempSize, tilesTouched, tilesTouchedScan, count);
@@ -51,4 +51,12 @@ MGSDRimageBuffers::MGSDRimageBuffers(uint8_t* mem, uint32_t count) :
 	tileRanges = bump<uint2>();
 	accumAlpha = bump<float>();
 	numContributors = bump<uint32_t>();
+}
+
+MGSDRderivativeBuffers::MGSDRderivativeBuffers(uint8_t* mem, uint32_t count) :
+	MGSDRrenderBuffers(mem, count)
+{
+	dLdPixCenters = bump<QMvec2>();
+	dLdConics     = bump<QMvec3>();
+	dLdColors     = bump<QMvec3>();
 }

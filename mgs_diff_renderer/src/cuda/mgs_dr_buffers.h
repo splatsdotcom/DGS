@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include "mgs_dr_global.h"
 
+#define QM_FUNC_ATTRIBS __device__ static inline
+#include "../external/QuickMath/quickmath.h"
+
 //-------------------------------------------//
 
 #define MGS_DR_L1_CACHE_ALIGNMENT 128
@@ -64,17 +67,17 @@ struct MGSDRgeomBuffers : public MGSDRrenderBuffers
 public:
 	MGSDRgeomBuffers(uint8_t* mem, uint32_t count);
 
-	float2* pixCenters;
-	float* pixRadii;
-	float* depths;
-	uint32_t* tilesTouched;
-	uint32_t* tilesTouchedScan;
-	MGSDRcov3D* covs;
-	float4* conic;
-	float3* rgb;
+	QMvec2*     __restrict__ pixCenters;
+	float*      __restrict__ pixRadii;
+	float*      __restrict__ depths;
+	uint32_t*   __restrict__ tilesTouched;
+	uint32_t*   __restrict__ tilesTouchedScan;
+	MGSDRcov3D* __restrict__ covs;
+	QMvec4*     __restrict__ conicOpacity;
+	QMvec3*     __restrict__ rgb;
 
 	size_t tilesTouchedScanTempSize;
-	uint8_t* tilesTouchedScanTemp;
+	uint8_t* __restrict__ tilesTouchedScanTemp;
 };
 
 struct MGSDRbinningBuffers : public MGSDRrenderBuffers
@@ -82,10 +85,10 @@ struct MGSDRbinningBuffers : public MGSDRrenderBuffers
 public:
 	MGSDRbinningBuffers(uint8_t* mem, uint32_t count);
 
-	uint64_t* keys;
-	uint32_t* indices;
-	uint64_t* keysSorted;
-	uint32_t* indicesSorted;
+	uint64_t* __restrict__ keys;
+	uint32_t* __restrict__ indices;
+	uint64_t* __restrict__ keysSorted;
+	uint32_t* __restrict__ indicesSorted;
 
 	size_t sortTempSize;
 	uint8_t* sortTemp;
@@ -96,9 +99,19 @@ struct MGSDRimageBuffers : public MGSDRrenderBuffers
 public:
 	MGSDRimageBuffers(uint8_t* mem, uint32_t count);
 
-	uint2* tileRanges;
-	float* accumAlpha;
-	uint32_t* numContributors;
+	uint2*    __restrict__ tileRanges;
+	float*    __restrict__ accumAlpha;
+	uint32_t* __restrict__ numContributors;
+};
+
+struct MGSDRderivativeBuffers : public MGSDRrenderBuffers
+{
+public:
+	MGSDRderivativeBuffers(uint8_t* mem, uint32_t count);
+
+	QMvec2* __restrict__ dLdPixCenters;
+	QMvec3* __restrict__ dLdConics;
+	QMvec3* __restrict__ dLdColors;
 };
 
 #endif //#ifndef MGS_DR_BUFFERS_H
