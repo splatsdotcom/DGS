@@ -297,9 +297,9 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	if(det != 0.0f)
 	{
 		float det2Inv = 1.0f / (det * det);
-		dLdA =        det2Inv * (-c * c * dLdConic.x + b * c * dLdConic.y + (det -        a * c) * dLdConic.z);
-		dLdC =        det2Inv * (-a * a * dLdConic.z + b * a * dLdConic.y + (det -        a * c) * dLdConic.x);
-		dLdB = 2.0f * det2Inv * ( b * c * dLdConic.x + a * b * dLdConic.z + (det + 2.0f * b * b) * dLdConic.y);
+		dLdA =        det2Inv * (-c * c * dLdConic.x + 2.0f * b * c         * dLdConic.y + (det - a * c) * dLdConic.z);
+		dLdC =        det2Inv * (-a * a * dLdConic.z + 2.0f * b * a         * dLdConic.y + (det - a * c) * dLdConic.x);
+		dLdB = 2.0f * det2Inv * ( b * c * dLdConic.x - (det + 2.0f * b * b) * dLdConic.y + a * b         * dLdConic.z);
 
 		dLdCov.m00 = T.m[0][0] * T.m[0][0] * dLdA + T.m[0][0] * T.m[1][0] * dLdB + T.m[1][0] * T.m[1][0] * dLdC;
 		dLdCov.m11 = T.m[0][1] * T.m[0][1] * dLdA + T.m[0][1] * T.m[1][1] * dLdB + T.m[1][1] * T.m[1][1] * dLdC;
