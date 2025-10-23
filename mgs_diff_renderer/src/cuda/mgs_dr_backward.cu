@@ -36,35 +36,67 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 						  float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics,
 						  bool debug)
 {
+	//validate:
+	//---------------
+	if(numGaussians == 0 || numRendered == 0)
+		return;
+
+	//start profiling:
+	//---------------
+	MGS_DR_PROFILE_REGION_START(total);
+
 	//initialize state from foward pass:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(initMem);
+
 	uint32_t tilesWidth  = _mgs_ceildivide32(width , MGS_DR_TILE_SIZE);
 	uint32_t tilesHeight = _mgs_ceildivide32(height, MGS_DR_TILE_SIZE);
 
-	MGSDRgeomBuffers geomBufs = MGSDRgeomBuffers((uint8_t*)geomBufsMem, numGaussians);
-	MGSDRbinningBuffers binningBufs = MGSDRbinningBuffers((uint8_t*)binningBufsMem, numRendered);
-	MGSDRimageBuffers imageBufs = MGSDRimageBuffers((uint8_t*)imageBufsMem, width * height);
+	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
+		(uint8_t*)geomBufsMem, numGaussians
+	));
+	MGSDRbinningBuffers binningBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRbinningBuffers(
+		(uint8_t*)binningBufsMem, numRendered
+	));
+	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
+		(uint8_t*)imageBufsMem, width * height
+	));
+
+	MGS_DR_PROFILE_REGION_END(initMem);
 
 	//allocate memory for intermediate derivatives:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(allocateIntermediate);
+
 	uint64_t intermediateDerivMemSize = MGSDRrenderBuffers::required_mem<MGSDRderivativeBuffers>(numGaussians);
 
 	uint8_t* intermediateDerivMem;
-	cudaMalloc(&intermediateDerivMem, intermediateDerivMemSize);
-	cudaMemset(intermediateDerivMem, 0, intermediateDerivMemSize);
+	MGS_DR_CUDA_ERROR_CHECK(cudaMalloc(&intermediateDerivMem, intermediateDerivMemSize));
+	MGS_DR_CUDA_ERROR_CHECK(cudaMemset(intermediateDerivMem, 0, intermediateDerivMemSize));
 
-	MGSDRderivativeBuffers intermediateDerivs = MGSDRderivativeBuffers(intermediateDerivMem, numGaussians);
+	MGSDRderivativeBuffers intermediateDerivs = MGS_DR_CUDA_ERROR_CHECK(MGSDRderivativeBuffers(
+		intermediateDerivMem, numGaussians
+	));
+
+	MGS_DR_PROFILE_REGION_END(allocateIntermediate);
 
 	//backward render:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(rasterize);
+
 	_mgs_dr_backward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
 		width, height, dLdImage, imageBufs.accumAlpha, imageBufs.numContributors,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs,
 		intermediateDerivs, outDLdOpacities
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
+
+	MGS_DR_PROFILE_REGION_END(rasterize);
 
 	//backward preprocess:
 	//---------------
+	MGS_DR_PROFILE_REGION_START(preprocess);
+
 	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_backward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
 		width, height, view, proj, focalX, focalY,
@@ -72,10 +104,27 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 		geomBufs, intermediateDerivs,
 		outDLdMeans, outDLdScales, outDLdRotations, outDLdColors, outDLdHarmonics
 	);
+	MGS_DR_CUDA_ERROR_CHECK();
+
+	MGS_DR_PROFILE_REGION_END(preprocess);
 
 	//cleanup:
 	//---------------
 	cudaFree(intermediateDerivMem);
+
+	//print timing information:
+	//---------------
+	MGS_DR_PROFILE_REGION_END(total);
+
+#ifdef MGS_DR_PROFILE
+	std::cout << std::endl;
+	std::cout << "TOTAL FRAME TIME (backwards): " << MGS_DR_PROFILE_REGION_TIME(total) << "ms" << std::endl;
+	std::cout << "\t- Initializing state from forward:     " << MGS_DR_PROFILE_REGION_TIME(initMem)              << "ms" << std::endl;
+	std::cout << "\t- Allocating intermediate derivatives: " << MGS_DR_PROFILE_REGION_TIME(allocateIntermediate) << "ms" << std::endl;
+	std::cout << "\t- Rasterizing:                         " << MGS_DR_PROFILE_REGION_TIME(rasterize)            << "ms" << std::endl;
+	std::cout << "\t- Preprocessing:                       " << MGS_DR_PROFILE_REGION_TIME(preprocess)           << "ms" << std::endl;
+	std::cout << std::endl;
+#endif
 }
 
 //-------------------------------------------//
@@ -162,11 +211,16 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 		//accumulate collected gaussians
 		for(uint32_t j = 0; j < min(MGS_DR_TILE_LEN, numToRender); j++)
 		{
-			curContributor--; //skip if current contributor is ahead of final
-			if(curContributor >= lastContributor)
-				continue;
+			//initialize local derivatives, needed here for correct reduction
+			QMvec3 dLdColor = qm_vec3_full(0.0f);
+			QMvec2 dLdPixCenter = qm_vec2_full(0.0f);
+			QMvec3 dLdConic = qm_vec3_full(0.0f);
+			float dLdOpacity = 0.0f;
 
-			//compute alpha
+			//read from shared memory
+			curContributor--;
+			bool contribute = !(curContributor >= lastContributor);
+			
 			uint32_t idx = collectedIndices[j];
 			QMvec2 pos = collectedPixCenters[j];
 			QMvec4 conicO = collectedConicOpacity[j];
@@ -176,63 +230,115 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 
 			float power = -0.5f * (conicO.x * dx * dx + conicO.z * dy * dy) - conicO.y * dx * dy;
 			if(power > 0.0f)
-				continue;
+				contribute = false;
 
 			float G = exp(power);
 			float alpha = min(MGS_DR_MAX_ALPHA, conicO.w * G);
 			if(alpha < MGS_DR_MIN_ALPHA)
-				continue;
+				contribute = false;
 
 			//update transmittance
-			transmittance /= (1.0f - alpha);
+			if(contribute)
+				transmittance /= (1.0f - alpha);
 
-			//compute alpha/color derivs
-			const float dChanneldColor = transmittance * alpha;
-
+			//update accum + last color, compute color derivatives
 			float dLdAlpha = 0.0f;
-			for(uint32_t k = 0; k < 3; k++)
+			if(contribute)
 			{
-				float channel = collectedRGB[j].v[k];
-				float dLdChannel = dLdPixel.v[k];
+				const float dChanneldColor = transmittance * alpha;
 
-				accumColor.v[k] = lastAlpha * lastColor.v[k] + (1.0f - lastAlpha) * accumColor.v[k];
-				lastColor.v[k] = channel;
+				for(uint32_t k = 0; k < 3; k++)
+				{
+					float channel = collectedRGB[j].v[k];
+					float dLdChannel = dLdPixel.v[k];
 
-				dLdAlpha += (channel - accumColor.v[k]) * dLdChannel;
+					accumColor.v[k] = lastAlpha * lastColor.v[k] + (1.0f - lastAlpha) * accumColor.v[k];
+					lastColor.v[k] = channel;
 
-				atomicAdd(&outIntermediate.dLdColors[idx].v[k], dChanneldColor * dLdChannel);
+					dLdAlpha += (channel - accumColor.v[k]) * dLdChannel;
+
+					dLdColor.v[k] = dChanneldColor * dLdChannel;
+				}
+
+				dLdAlpha *= transmittance;
+				lastAlpha = alpha;
 			}
-
-			dLdAlpha *= transmittance;
-			lastAlpha = alpha;
 
 			//compute conic derivs
 			float dLdG = conicO.w * dLdAlpha;
 			float dGdDx = -G * dx * conicO.x - G * dy * conicO.y;
 			float dGdDy = -G * dy * conicO.z - G * dx * conicO.y;
-			
+
 			QMvec3 dGdConic = {
 				-0.5f * G * dx * dx,
 				-0.5f * G * dx * dy, //treating conic.y the off-diag 2x2 covariance matrix, so we mul by 0.5
 				-0.5f * G * dy * dy
 			};
 
-			//update derivs
-			//TODO: make these faster with a shared add first
-			atomicAdd(&outIntermediate.dLdPixCenters[idx].x, dLdG * dGdDx * dDxdX);
-			atomicAdd(&outIntermediate.dLdPixCenters[idx].y, dLdG * dGdDy * dDydY);
+			//fill local accumulators
+			if(contribute)
+			{
+				dLdPixCenter = {
+					dLdG * dGdDx * dDxdX,
+					dLdG * dGdDy * dDydY
+				};
 
-			atomicAdd(&outIntermediate.dLdConics[idx].x, dLdG * dGdConic.x);
-			atomicAdd(&outIntermediate.dLdConics[idx].y, dLdG * dGdConic.y);
-			atomicAdd(&outIntermediate.dLdConics[idx].z, dLdG * dGdConic.z);
+				dLdConic = {
+					dLdG * dGdConic.x,
+					dLdG * dGdConic.y,
+					dLdG * dGdConic.z
+				};
 
-			atomicAdd(&outDLdOpacities[idx], dLdAlpha * G);
+				dLdOpacity = dLdAlpha * G;
+			}
+
+			//warp-reduce local derivatives
+			uint32_t active = __activemask();
+
+			uint32_t rank = block.thread_rank();
+			uint32_t lane = rank & 31u;
+
+			for(uint32_t offset = 16; offset > 0; offset >>= 1)
+			{
+				//TODO: too much register pressure?
+				
+				dLdColor.x += __shfl_down_sync(active, dLdColor.x, offset);
+				dLdColor.y += __shfl_down_sync(active, dLdColor.y, offset);
+				dLdColor.z += __shfl_down_sync(active, dLdColor.z, offset);
+
+				dLdPixCenter.x += __shfl_down_sync(active, dLdPixCenter.x, offset);
+				dLdPixCenter.y += __shfl_down_sync(active, dLdPixCenter.y, offset);
+
+				dLdConic.x += __shfl_down_sync(active, dLdConic.x, offset);
+				dLdConic.y += __shfl_down_sync(active, dLdConic.y, offset);
+				dLdConic.z += __shfl_down_sync(active, dLdConic.z, offset);
+
+				dLdOpacity += __shfl_down_sync(active, dLdOpacity, offset);
+			}
+
+			//update global derivatives atomically with warp leader
+			if(lane == 0) 
+			{
+				atomicAdd(&outIntermediate.dLdColors[idx].x, dLdColor.x);
+				atomicAdd(&outIntermediate.dLdColors[idx].y, dLdColor.y);
+				atomicAdd(&outIntermediate.dLdColors[idx].z, dLdColor.z);
+
+				atomicAdd(&outIntermediate.dLdPixCenters[idx].x, dLdPixCenter.x);
+				atomicAdd(&outIntermediate.dLdPixCenters[idx].y, dLdPixCenter.y);
+
+				atomicAdd(&outIntermediate.dLdConics[idx].x, dLdConic.x);
+				atomicAdd(&outIntermediate.dLdConics[idx].y, dLdConic.y);
+				atomicAdd(&outIntermediate.dLdConics[idx].z, dLdConic.z);
+
+				atomicAdd(&outDLdOpacities[idx], dLdOpacity);
+			}
 		}
 
 		//decrement num left to render
 		numToRender -= MGS_DR_TILE_LEN;
 	}
 }
+
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
 _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,

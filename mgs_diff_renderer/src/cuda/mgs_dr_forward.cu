@@ -198,7 +198,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 
 #ifdef MGS_DR_PROFILE
 	std::cout << std::endl;
-	std::cout << "TOTAL FRAME RENDER TIME: " << MGS_DR_PROFILE_REGION_TIME(total) << "ms" << std::endl;
+	std::cout << "TOTAL FRAME TIME (forwards): " << MGS_DR_PROFILE_REGION_TIME(total) << "ms" << std::endl;
 	std::cout << "\t- Allocating geom + image buffers: " << MGS_DR_PROFILE_REGION_TIME(allocateGeomImage) << "ms" << std::endl;
 	std::cout << "\t- Preprocessing:                   " << MGS_DR_PROFILE_REGION_TIME(preprocess)        << "ms" << std::endl;
 	std::cout << "\t- Tile count scan:                 " << MGS_DR_PROFILE_REGION_TIME(tileCountScan)     << "ms" << std::endl;

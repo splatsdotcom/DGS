@@ -4,6 +4,7 @@ import math
 from PIL import Image
 import os
 import mgs_diff_renderer
+import time
 
 # -------------------------------------------------------------
 # Utility camera functions
@@ -80,6 +81,8 @@ def main():
 	torch.set_default_device('cuda')
 	os.makedirs("renders", exist_ok=True)
 
+	torch.manual_seed(0)
+
 	width, height = 1920, 1080
 	aspect = width / height
 	fovy = math.radians(60)
@@ -144,7 +147,9 @@ def main():
 	optimizer = torch.optim.Adam([means, scales, rotations, opacities, colors], lr=1e-2)
 
 	# ---------------- Training Loop ----------------
-	for step in range(1000):
+	start = time.time()
+	
+	for step in range(500):
 		optimizer.zero_grad()
 		total_loss = 0.0
 
@@ -189,8 +194,7 @@ def main():
 				Image.fromarray(img_np, mode='RGB').save(f"renders/train_step_{step:03d}.png")
 
 	print("✅ Training complete.")
-	print("Final means (optimized):\n", means)
-	print("Ground truth means:\n", gt_means)
+	print(f"Took {time.time() - start}s")
 
 if __name__ == "__main__":
 	main()
