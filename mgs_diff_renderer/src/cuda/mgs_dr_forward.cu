@@ -51,6 +51,13 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
                              std::function<uint8_t* (uint64_t size)> createGeomBuf, std::function<uint8_t* (uint64_t size)> createBinningBuf, std::function<uint8_t* (uint64_t size)> createImageBuf,
                              bool debug)
 {
+	//validate:
+	//---------------
+	if(numGaussians == 0)
+		return 0;
+
+	//start profiling:
+	//---------------
 	MGS_DR_PROFILE_REGION_START(total);
 
 	//allocate geometry + image buffers:
@@ -74,7 +81,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
 		imageBufMem, outWidth * outHeight
 	));
-	
+
 	MGS_DR_PROFILE_REGION_END(allocateGeomImage);
 
 	//preprocess:
@@ -105,6 +112,9 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	));
 
 	MGS_DR_PROFILE_REGION_END(tileCountScan);
+
+	if(numRendered == 0)
+		return 0;
 
 	//allocate binning buffers:
 	//---------------
