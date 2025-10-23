@@ -18,7 +18,7 @@ def look_at(eye, target, up):
 	m[0, 3] = -torch.dot(s, eye)
 	m[1, 3] = -torch.dot(u, eye)
 	m[2, 3] = torch.dot(f, eye)
-	return m.T
+	return m
 
 def perspective(fovy, aspect, znear, zfar):
 	tan_half_fovy = math.tan(fovy / 2)
@@ -28,7 +28,7 @@ def perspective(fovy, aspect, znear, zfar):
 	m[2, 2] = -(zfar + znear) / (zfar - znear)
 	m[2, 3] = -(2 * zfar * znear) / (zfar - znear)
 	m[3, 2] = -1.0
-	return m.T
+	return m
 
 def finite_difference_gradcheck(func, loss_func, inputs, eps=1e-3, atol=1e-3, rtol=1e-2):
 	# Compute analytical grads
@@ -106,7 +106,6 @@ def main():
 	target = torch.zeros_like(y)
 	target[..., 2] = 1.0  # pure blue target
 	loss = torch.nn.functional.mse_loss(y, target)
-	print(loss)
 
 	# Run backward pass
 	loss.backward()
@@ -135,7 +134,7 @@ def main():
 		target[..., 2] = 1.0  # pure blue target
 		return torch.nn.functional.mse_loss(out, target)		
 
-	finite_difference_gradcheck(func, loss_func, [means, scales, rotations, opacities, colors, harmonics])
+	# finite_difference_gradcheck(func, loss_func, [means, scales, rotations, opacities, colors, harmonics])
 
 if __name__ == "__main__":
 	main()

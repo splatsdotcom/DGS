@@ -23,7 +23,7 @@ def look_at(eye, target, up):
 	m[0, 3] = -torch.dot(s, eye)
 	m[1, 3] = -torch.dot(u, eye)
 	m[2, 3] = torch.dot(f, eye)
-	return m.T
+	return m
 
 def perspective(fovy, aspect, znear, zfar):
 	tan_half_fovy = math.tan(fovy / 2)
@@ -33,7 +33,7 @@ def perspective(fovy, aspect, znear, zfar):
 	m[2, 2] = -(zfar + znear) / (zfar - znear)
 	m[2, 3] = -(2 * zfar * znear) / (zfar - znear)
 	m[3, 2] = -1.0
-	return m.T
+	return m
 
 # -------------------------------------------------------------
 # Renderer wrapper
@@ -50,7 +50,7 @@ def render_scene(width, height, view, proj, focalX, focalY, means, scales, rotat
 # Finite-difference gradient check for scales
 # -------------------------------------------------------------
 
-def finite_difference_gradcheck(gt_views, width, height, proj, focalX, focalY, features, featIdx, eps=1e-3):
+def finite_difference_gradcheck(gt_views, width, height, proj, focalX, focalY, features, featIdx, eps=1e-5):
 	grad_fd = torch.zeros_like(features[featIdx])
 	with torch.no_grad():
 		for idx in np.ndindex(features[featIdx].shape):
@@ -160,10 +160,10 @@ def main():
 
 		# if step % 10 == 0:
 		# 	with torch.no_grad():
-		# 		grad_analytical = rotations.grad.detach().clone()
+		# 		grad_analytical = scales.grad.detach().clone()
 		# 		grad_fd = finite_difference_gradcheck(
 		# 			gt_views, width, height, proj, focalX, focalY,
-		# 			( means, scales, rotations, opacities, colors, harmonics ), 2
+		# 			( means, scales, rotations, opacities, colors, harmonics ), 1
 		# 		)
 
 		# 		diff = (grad_fd - grad_analytical).abs()
@@ -179,7 +179,7 @@ def main():
 		# 		print("Grad FD:\n", grad_fd)
 		# 		print("Rel error:\n", rel_err)
 
-		if True:# step % 10 == 0 or step == 199:
+		if step % 10 == 0 or step == 199:
 			print(f"[Step {step:03d}] Loss = {total_loss.item():.6f}")
 			with torch.no_grad():
 				view, _ = gt_views[0]

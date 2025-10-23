@@ -231,8 +231,8 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 
 	//find view and clip pos:
 	//---------------
-	QMmat4 viewMat = qm_mat4_load(view);
-	QMmat4 projMat = qm_mat4_load(proj);
+	QMmat4 viewMat = qm_mat4_load_row_major(view);
+	QMmat4 projMat = qm_mat4_load_row_major(proj);
 	
 	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
 
