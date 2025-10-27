@@ -166,9 +166,6 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 		inside ? dLdImg[pixelId * 3 + 2] : 0.0f
 	};
 
-	float dDxdX = 0.5f * width;
-	float dDydY = 0.5f * height;
-
 	//allocate shared memory:
 	//---------------
 	__shared__ uint32_t collectedIndices   [MGS_DR_TILE_LEN];
@@ -279,8 +276,8 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 			if(contribute)
 			{
 				dLdPixCenter = {
-					dLdG * dGdDx * dDxdX,
-					dLdG * dGdDy * dDydY
+					dLdG * dGdDx,
+					dLdG * dGdDy
 				};
 
 				dLdConic = {
@@ -454,7 +451,7 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 
 	//this is only part of dLdMean (how it affects the jacobian), dLdMean w.r.t. dLdPixCenters will be computed later
 	QMvec4 dLdMeanJ = qm_mat4_mult_vec4(
-		qm_mat4_transpose(viewMat),
+		qm_mat4_transpose(viewMat), //same as inverse for rotation part, ignoring translation
 		(QMvec4){ (float)dLdCamPosX, (float)dLdCamPosY, (float)dLdCamPosZ, 0.0f } 
 	);
 
@@ -462,14 +459,21 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	//---------------
 	QMmat4 PV = qm_mat4_mult(projMat, viewMat);
 
-	float clipW = 1.0f / (clipPos.w + 0.000001f);
-	float mul1 = (PV.m[0][0] * mean.x + PV.m[1][0] * mean.y + PV.m[2][0] * mean.z + PV.m[3][0]) * clipW * clipW;
-	float mul2 = (PV.m[0][1] * mean.x + PV.m[1][1] * mean.y + PV.m[2][1] * mean.z + PV.m[3][1]) * clipW * clipW;
+	float invClipW = 1.0f / (clipPos.w + 0.000001f);
+	float invClipW2 = invClipW * invClipW;
 	
+	QMvec2 dLdClipPos = {
+		intermediate.dLdPixCenters[idx].x * width  * 0.5f,
+		intermediate.dLdPixCenters[idx].y * height * 0.5f,
+	};
+
 	QMvec3 dLdMeanScreenspace;
-	dLdMeanScreenspace.x = (PV.m[0][0] * clipW - PV.m[0][3] * mul1) * intermediate.dLdPixCenters[idx].x + (PV.m[0][1] * clipW - PV.m[0][3] * mul2) * intermediate.dLdPixCenters[idx].y;
-	dLdMeanScreenspace.y = (PV.m[1][4] * clipW - PV.m[1][3] * mul1) * intermediate.dLdPixCenters[idx].x + (PV.m[1][1] * clipW - PV.m[1][3] * mul2) * intermediate.dLdPixCenters[idx].y;
-	dLdMeanScreenspace.z = (PV.m[2][0] * clipW - PV.m[2][3] * mul1) * intermediate.dLdPixCenters[idx].x + (PV.m[2][1] * clipW - PV.m[2][3] * mul2) * intermediate.dLdPixCenters[idx].y;
+	dLdMeanScreenspace.x = (PV.m[0][0] * invClipW - PV.m[0][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (PV.m[0][1] * invClipW - PV.m[0][3] * clipPos.y * invClipW2) * dLdClipPos.y;
+	dLdMeanScreenspace.y = (PV.m[1][0] * invClipW - PV.m[1][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (PV.m[1][1] * invClipW - PV.m[1][3] * clipPos.y * invClipW2) * dLdClipPos.y;
+	dLdMeanScreenspace.z = (PV.m[2][0] * invClipW - PV.m[2][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (PV.m[2][1] * invClipW - PV.m[2][3] * clipPos.y * invClipW2) * dLdClipPos.y;
 
 	QMvec3 dLdMean = {
 		dLdMeanScreenspace.x + dLdMeanJ.x,
@@ -489,7 +493,7 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	QMmat3 dLdM = qm_mat3_mult(
 		M, (QMmat3){{
 			{ 2.0f * dLdCov.m00,        dLdCov.m01,        dLdCov.m02 },
-			{        dLdCov.m01, 2.0f * dLdCov.m11,        dLdCov.m12 },
+			{        dLdCov.m01, 2.0f * dLdCov.m11,        dLdCov.m12 }, // dLdCov * 2 (off-diagonals are already scaled by 2)
 			{        dLdCov.m02,        dLdCov.m12, 2.0f * dLdCov.m22 }
 		}}
 	);
@@ -503,14 +507,28 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 		qm_vec3_dot(rotMatT.v[2], dLdMT.v[2])
 	};
 
-	for(uint32_t i = 0; i < 3; i++)
-		dLdMT.v[i] = qm_vec3_scale(dLdMT.v[i], scale.v[i]);
+	QMmat3 dLdRotMatT = { .v = {
+		qm_vec3_scale(dLdMT.v[0], scale.v[0]),
+		qm_vec3_scale(dLdMT.v[1], scale.v[1]),
+		qm_vec3_scale(dLdMT.v[2], scale.v[2])
+	}};
 
 	QMquaternion dLdRot;
-	dLdRot.x = 2.0f * rot.y * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.z * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.w * (dLdMT.m[1][2] - dLdMT.m[2][1]) - 4.0f * rot.x * (dLdMT.m[2][2] + dLdMT.m[1][1]);
-	dLdRot.y = 2.0f * rot.x * (dLdMT.m[1][0] + dLdMT.m[0][1]) + 2.0f * rot.w * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.z * (dLdMT.m[1][2] + dLdMT.m[2][1]) - 4.0f * rot.y * (dLdMT.m[2][2] + dLdMT.m[0][0]);
-	dLdRot.z = 2.0f * rot.w * (dLdMT.m[1][0] - dLdMT.m[0][1]) + 2.0f * rot.x * (dLdMT.m[2][0] + dLdMT.m[0][2]) + 2.0f * rot.y * (dLdMT.m[2][1] + dLdMT.m[1][2]) - 4.0f * rot.z * (dLdMT.m[0][0] + dLdMT.m[1][1]);
-	dLdRot.w = 2.0f * rot.z * (dLdMT.m[0][1] - dLdMT.m[1][0]) + 2.0f * rot.y * (dLdMT.m[2][0] - dLdMT.m[0][2]) + 2.0f * rot.x * (dLdMT.m[1][2] - dLdMT.m[2][1]);
+	dLdRot.x = 2.0f * rot.y * (dLdRotMatT.m[1][0] + dLdRotMatT.m[0][1]) + 
+	           2.0f * rot.z * (dLdRotMatT.m[2][0] + dLdRotMatT.m[0][2]) + 
+	           2.0f * rot.w * (dLdRotMatT.m[1][2] - dLdRotMatT.m[2][1]) - 
+	           4.0f * rot.x * (dLdRotMatT.m[2][2] + dLdRotMatT.m[1][1]);
+	dLdRot.y = 2.0f * rot.x * (dLdRotMatT.m[1][0] + dLdRotMatT.m[0][1]) + 
+	           2.0f * rot.w * (dLdRotMatT.m[2][0] - dLdRotMatT.m[0][2]) + 
+	           2.0f * rot.z * (dLdRotMatT.m[1][2] + dLdRotMatT.m[2][1]) - 
+	           4.0f * rot.y * (dLdRotMatT.m[2][2] + dLdRotMatT.m[0][0]);
+	dLdRot.z = 2.0f * rot.w * (dLdRotMatT.m[1][0] - dLdRotMatT.m[0][1]) + 
+	           2.0f * rot.x * (dLdRotMatT.m[2][0] + dLdRotMatT.m[0][2]) + 
+	           2.0f * rot.y * (dLdRotMatT.m[2][1] + dLdRotMatT.m[1][2]) - 
+	           4.0f * rot.z * (dLdRotMatT.m[0][0] + dLdRotMatT.m[1][1]);
+	dLdRot.w = 2.0f * rot.z * (dLdRotMatT.m[0][1] - dLdRotMatT.m[1][0]) + 
+	           2.0f * rot.y * (dLdRotMatT.m[2][0] - dLdRotMatT.m[0][2]) + 
+	           2.0f * rot.x * (dLdRotMatT.m[1][2] - dLdRotMatT.m[2][1]);
 
 	//compute gradients w.r.t. harmonics:
 	//---------------

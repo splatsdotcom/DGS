@@ -270,10 +270,8 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 		{ 0.0,                0.0,                 0.0                                         }
 	}};
 
-	QMmat3 T = qm_mat3_mult(
-		qm_mat3_transpose(qm_mat4_top_left(viewMat)),
-		J
-	);
+	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(viewMat));
+	QMmat3 T = qm_mat3_mult(W, J);
 
 	QMmat3 cov2d = qm_mat3_mult(
 		qm_mat3_transpose(T),
