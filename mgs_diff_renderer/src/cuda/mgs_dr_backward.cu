@@ -23,21 +23,19 @@ _mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const
                               MGSDRderivativeBuffers outIntermediate, float* outDLdOpacities);
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
-                                   const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussians,
 								   const MGSDRgeomBuffers geom, const MGSDRderivativeBuffers intermediate,
-                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics);
+                                   MGSDRgaussians outDLdGaussians);
 
 //-------------------------------------------//
 
-void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_t numGaussians, 
-                          const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, MGSDRgaussians gaussians,
                           uint32_t numRendered, const uint8_t* geomBufsMem, const uint8_t* binningBufsMem, const uint8_t* imageBufsMem,
-                          float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics)
+                          MGSDRgaussians outDLdGaussians)
 {
 	//validate:
 	//---------------
-	if(numGaussians == 0 || numRendered == 0)
+	if(gaussians.count == 0 || numRendered == 0)
 		return;
 
 	//start profiling:
@@ -52,7 +50,7 @@ void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_
 	uint32_t tilesHeight = _mgs_ceildivide32(settings.height, MGS_DR_TILE_SIZE);
 
 	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
-		(uint8_t*)geomBufsMem, numGaussians
+		(uint8_t*)geomBufsMem, gaussians.count
 	));
 	MGSDRbinningBuffers binningBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRbinningBuffers(
 		(uint8_t*)binningBufsMem, numRendered
@@ -67,14 +65,14 @@ void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_
 	//---------------
 	MGS_DR_PROFILE_REGION_START(allocateIntermediate);
 
-	uint64_t intermediateDerivMemSize = MGSDRrenderBuffers::required_mem<MGSDRderivativeBuffers>(numGaussians);
+	uint64_t intermediateDerivMemSize = MGSDRrenderBuffers::required_mem<MGSDRderivativeBuffers>(gaussians.count);
 
 	uint8_t* intermediateDerivMem;
 	MGS_DR_CUDA_ERROR_CHECK(cudaMalloc(&intermediateDerivMem, intermediateDerivMemSize));
 	MGS_DR_CUDA_ERROR_CHECK(cudaMemset(intermediateDerivMem, 0, intermediateDerivMemSize));
 
 	MGSDRderivativeBuffers intermediateDerivs = MGS_DR_CUDA_ERROR_CHECK(MGSDRderivativeBuffers(
-		intermediateDerivMem, numGaussians
+		intermediateDerivMem, gaussians.count
 	));
 
 	MGS_DR_PROFILE_REGION_END(allocateIntermediate);
@@ -86,7 +84,7 @@ void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_
 	_mgs_dr_backward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
 		settings, dLdImage, imageBufs.accumAlpha, imageBufs.numContributors,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs,
-		intermediateDerivs, outDLdOpacities
+		intermediateDerivs, outDLdGaussians.opacities
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
@@ -96,12 +94,11 @@ void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_
 	//---------------
 	MGS_DR_PROFILE_REGION_START(preprocess);
 
-	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
+	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(gaussians.count, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_backward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
-		settings, numGaussians, 
-		means, scales, rotations, opacities, colors, harmonics,
+		settings, gaussians,
 		geomBufs, intermediateDerivs,
-		outDLdMeans, outDLdScales, outDLdRotations, outDLdColors, outDLdHarmonics
+		outDLdGaussians
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
@@ -336,17 +333,17 @@ _mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const
 }
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussians,
                                    const MGSDRgeomBuffers geom, const MGSDRderivativeBuffers intermediate,
-                                   float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics)
+                                   MGSDRgaussians outDLdGaussians)
 {
 	auto idx = cg::this_grid().thread_rank();
-	if(idx >= numGaussians || geom.pixRadii[idx] <= 0.0f)
+	if(idx >= gaussians.count || geom.pixRadii[idx] <= 0.0f)
 		return;
 
 	//find view + clip pos:
 	//---------------
-	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
+	QMvec3 mean = qm_vec3_load(&gaussians.means[idx * 3]);
 
 	QMvec4 camPos = qm_mat4_mult_vec4(
 		settings.view, 
@@ -453,8 +450,6 @@ _mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians
 
 	//compute gradients w.r.t. mean (where the mean affects screenspace position):
 	//---------------
-	QMmat4 PV = qm_mat4_mult(settings.proj, settings.view);
-
 	float invClipW = 1.0f / (clipPos.w + 0.000001f);
 	float invClipW2 = invClipW * invClipW;
 	
@@ -464,12 +459,12 @@ _mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians
 	};
 
 	QMvec3 dLdMeanScreenspace;
-	dLdMeanScreenspace.x = (PV.m[0][0] * invClipW - PV.m[0][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
-	                       (PV.m[0][1] * invClipW - PV.m[0][3] * clipPos.y * invClipW2) * dLdClipPos.y;
-	dLdMeanScreenspace.y = (PV.m[1][0] * invClipW - PV.m[1][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
-	                       (PV.m[1][1] * invClipW - PV.m[1][3] * clipPos.y * invClipW2) * dLdClipPos.y;
-	dLdMeanScreenspace.z = (PV.m[2][0] * invClipW - PV.m[2][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
-	                       (PV.m[2][1] * invClipW - PV.m[2][3] * clipPos.y * invClipW2) * dLdClipPos.y;
+	dLdMeanScreenspace.x = (settings.viewProj.m[0][0] * invClipW - settings.viewProj.m[0][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (settings.viewProj.m[0][1] * invClipW - settings.viewProj.m[0][3] * clipPos.y * invClipW2) * dLdClipPos.y;
+	dLdMeanScreenspace.y = (settings.viewProj.m[1][0] * invClipW - settings.viewProj.m[1][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (settings.viewProj.m[1][1] * invClipW - settings.viewProj.m[1][3] * clipPos.y * invClipW2) * dLdClipPos.y;
+	dLdMeanScreenspace.z = (settings.viewProj.m[2][0] * invClipW - settings.viewProj.m[2][3] * clipPos.x * invClipW2) * dLdClipPos.x + 
+	                       (settings.viewProj.m[2][1] * invClipW - settings.viewProj.m[2][3] * clipPos.y * invClipW2) * dLdClipPos.y;
 
 	QMvec3 dLdMean = {
 		dLdMeanScreenspace.x + dLdMeanJ.x,
@@ -479,8 +474,8 @@ _mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians
 
 	//compute gradients w.r.t. scale and rotation:
 	//---------------
-	QMvec3 scale = qm_vec3_load(&scales[idx * 3]);
-	QMquaternion rot = qm_quaternion_load(&rotations[idx * 4]);
+	QMvec3 scale = qm_vec3_load(&gaussians.scales[idx * 3]);
+	QMquaternion rot = qm_quaternion_load(&gaussians.rotations[idx * 4]);
 
 	QMmat3 scaleMat = qm_mat4_top_left(qm_mat4_scale(scale));
 	QMmat3 rotMat = qm_mat4_top_left(qm_quaternion_to_mat4(rot));
@@ -534,8 +529,8 @@ _mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians
 
 	//write out:
 	//---------------
-	qm_vec3_store(dLdMean, &outDLdMeans[idx * 3]);
-	qm_vec3_store(dLdScale, &outDLdScales[idx * 3]);
-	qm_quaternion_store(dLdRot, &outDLdRotations[idx * 4]);
-	qm_vec3_store(dLdColor, &outDLdColors[idx * 3]);
+	qm_vec3_store(dLdMean, &outDLdGaussians.means[idx * 3]);
+	qm_vec3_store(dLdScale, &outDLdGaussians.scales[idx * 3]);
+	qm_quaternion_store(dLdRot, &outDLdGaussians.rotations[idx * 4]);
+	qm_vec3_store(dLdColor, &outDLdGaussians.colors[idx * 3]);
 }

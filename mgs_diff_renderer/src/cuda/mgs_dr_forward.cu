@@ -25,9 +25,7 @@ namespace cg = cooperative_groups;
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
-                                 const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 MGSDRgeomBuffers outGeom);
+_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussians, MGSDRgeomBuffers outGeom);
 
 __global__ static void __launch_bounds__(MGS_DR_KEY_WRITE_WORKGROUP_SIZE)
 _mgs_dr_forward_write_keys_kernel(uint32_t width, uint32_t height,
@@ -46,14 +44,13 @@ __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, 
 
 //-------------------------------------------//
 
-uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians, 
-                             const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, MGSDRgaussians gaussians,
                              MGSDRresizeFunc createGeomBuf, MGSDRresizeFunc createBinningBuf, MGSDRresizeFunc createImageBuf,
                              float* outImg)
 {
 	//validate:
 	//---------------
-	if(numGaussians == 0)
+	if(gaussians.count == 0)
 		return 0;
 
 	//start profiling:
@@ -69,14 +66,14 @@ uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians,
 	uint32_t tilesLen = tilesWidth * tilesHeight;
 
 	uint8_t* geomBufMem = createGeomBuf(
-		MGSDRrenderBuffers::required_mem<MGSDRgeomBuffers>(numGaussians)
+		MGSDRrenderBuffers::required_mem<MGSDRgeomBuffers>(gaussians.count)
 	);
 	uint8_t* imageBufMem = createImageBuf(
 		MGSDRimageBuffers::required_mem<MGSDRimageBuffers>(settings.width * settings.height)
 	);
 	
 	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
-		geomBufMem, numGaussians
+		geomBufMem, gaussians.count
 	));
 	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
 		imageBufMem, settings.width * settings.height
@@ -88,10 +85,9 @@ uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians,
 	//---------------
 	MGS_DR_PROFILE_REGION_START(preprocess);
 
-	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
+	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(gaussians.count, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_foward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
-		settings, numGaussians, means, scales, rotations, opacities, colors, harmonics,
-		geomBufs
+		settings, gaussians, geomBufs
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
 
@@ -102,12 +98,12 @@ uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians,
 	MGS_DR_PROFILE_REGION_START(tileCountScan);
 
 	MGS_DR_CUDA_ERROR_CHECK(cub::DeviceScan::InclusiveSum(
-		geomBufs.tilesTouchedScanTemp, geomBufs.tilesTouchedScanTempSize, geomBufs.tilesTouched, geomBufs.tilesTouchedScan, numGaussians
+		geomBufs.tilesTouchedScanTemp, geomBufs.tilesTouchedScanTempSize, geomBufs.tilesTouched, geomBufs.tilesTouchedScan, gaussians.count
 	));
 
 	uint32_t numRendered;
 	MGS_DR_CUDA_ERROR_CHECK(cudaMemcpy(
-		&numRendered, geomBufs.tilesTouchedScan + numGaussians - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost
+		&numRendered, geomBufs.tilesTouchedScan + gaussians.count - 1, sizeof(uint32_t), cudaMemcpyDeviceToHost
 	));
 
 	MGS_DR_PROFILE_REGION_END(tileCountScan);
@@ -133,10 +129,10 @@ uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians,
 	//---------------
 	MGS_DR_PROFILE_REGION_START(writeKeys);
 
-	uint32_t numWorkgroupsWriteKeys = _mgs_ceildivide32(numGaussians, MGS_DR_KEY_WRITE_WORKGROUP_SIZE);
+	uint32_t numWorkgroupsWriteKeys = _mgs_ceildivide32(gaussians.count, MGS_DR_KEY_WRITE_WORKGROUP_SIZE);
 	_mgs_dr_forward_write_keys_kernel<<<numWorkgroupsWriteKeys, MGS_DR_KEY_WRITE_WORKGROUP_SIZE>>>(
 		settings.width, settings.height,
-		numGaussians, geomBufs,
+		gaussians.count, geomBufs,
 		binningBufs.keys, binningBufs.indices
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
@@ -217,12 +213,10 @@ uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians,
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
-                                 const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                                 MGSDRgeomBuffers outGeom)
+_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussians, MGSDRgeomBuffers outGeom)
 {
 	auto idx = cg::this_grid().thread_rank();
-	if(idx >= numGaussians)
+	if(idx >= gaussians.count)
 		return;
 
 	outGeom.tilesTouched[idx] = 0; //so we dont render if culled
@@ -230,7 +224,7 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians,
 
 	//find view and clip pos:
 	//---------------
-	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
+	QMvec3 mean = qm_vec3_load(&gaussians.means[idx * 3]);
 
 	QMvec4 camPos = qm_mat4_mult_vec4(
 		settings.view, 
@@ -251,8 +245,8 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians,
 
 	//compute covariance matrix:
 	//---------------
-	QMmat4 scaleMat = qm_mat4_scale(qm_vec3_load(&scales[idx * 3]));
-	QMmat4 rotMat = qm_quaternion_to_mat4(qm_quaternion_load(&rotations[idx * 4]));
+	QMmat4 scaleMat = qm_mat4_scale(qm_vec3_load(&gaussians.scales[idx * 3]));
+	QMmat4 rotMat = qm_quaternion_to_mat4(qm_quaternion_load(&gaussians.rotations[idx * 4]));
 
 	//TODO: add mat3 scale and rot functions to QM so we dont need to do a top_left
 	QMmat3 M = qm_mat4_top_left(qm_mat4_mult(scaleMat, rotMat));
@@ -311,7 +305,7 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians,
 
 	//compute spherical harmonics:
 	//---------------
-	QMvec3 color = qm_vec3_load(&colors[idx * 3]);
+	QMvec3 color = qm_vec3_load(&gaussians.colors[idx * 3]);
 
 	//TODO: actual SH
 
@@ -322,7 +316,7 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians,
 	outGeom.depths      [idx] = camPos.z;
 	outGeom.tilesTouched[idx] = (tilesMax.x - tilesMin.x) * (tilesMax.y - tilesMin.y);
 	outGeom.covs        [idx] = { cov.m[0][0], cov.m[1][0], cov.m[2][0], cov.m[1][1], cov.m[2][1], cov.m[2][2] };
-	outGeom.conicOpacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+	outGeom.conicOpacity[idx] = { conic.x, conic.y, conic.z, gaussians.opacities[idx] };
 	outGeom.rgb         [idx] = { color.x, color.y, color.z };
 }
 

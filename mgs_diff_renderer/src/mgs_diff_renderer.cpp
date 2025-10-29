@@ -85,23 +85,26 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 	at::Tensor binningBuf = torch::empty({0}, byteOpts.device(device));
 	at::Tensor imageBuf   = torch::empty({0}, byteOpts.device(device));
 
+	//populate gaussians struct:
+	//---------------
+	MGSDRgaussians gaussians;
+	gaussians.count = numGaussians;
+	gaussians.means     = means    .contiguous().data_ptr<float>();
+	gaussians.scales    = scales   .contiguous().data_ptr<float>();
+	gaussians.rotations = rotations.contiguous().data_ptr<float>();
+	gaussians.opacities = opacities.contiguous().data_ptr<float>();
+	gaussians.colors    = colors   .contiguous().data_ptr<float>();
+	gaussians.harmonics = harmonics.contiguous().data_ptr<float>();
+
 	//render:
 	//---------------	
 	uint32_t numRendered = mgs_dr_forward_cuda(
-		cSettings,
-
-		numGaussians,
-		means    .contiguous().data_ptr<float>(),
-		scales   .contiguous().data_ptr<float>(),
-		rotations.contiguous().data_ptr<float>(),
-		opacities.contiguous().data_ptr<float>(),
-		colors   .contiguous().data_ptr<float>(),
-		harmonics.contiguous().data_ptr<float>(),
-
+		cSettings, gaussians,
+		
 		_mgs_dr_tensor_resize_function(geomBuf),
 		_mgs_dr_tensor_resize_function(binningBuf),
 		_mgs_dr_tensor_resize_function(imageBuf),
-
+		
 		outImage.contiguous().data_ptr<float>()
 	);
 
@@ -132,40 +135,43 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 
 	//allocate output tensors:
 	//---------------
+	at::Tensor dLdMeans     = torch::zeros_like(means)    .contiguous();
+	at::Tensor dLdScales    = torch::zeros_like(scales)   .contiguous();
+	at::Tensor dLdRotations = torch::zeros_like(rotations).contiguous();
+	at::Tensor dLdOpacities = torch::zeros_like(opacities).contiguous();
+	at::Tensor dLdColors    = torch::zeros_like(colors)   .contiguous();
+	at::Tensor dLdHarmonics = torch::zeros_like(harmonics).contiguous();
 
-	//TODO: ensure contiguous
-	at::Tensor dLdMeans     = torch::zeros_like(means);
-	at::Tensor dLdScales    = torch::zeros_like(scales);
-	at::Tensor dLdRotations = torch::zeros_like(rotations);
-	at::Tensor dLdOpacities = torch::zeros_like(opacities);
-	at::Tensor dLdColors    = torch::zeros_like(colors);
-	at::Tensor dLdHarmonics = torch::zeros_like(harmonics);
+	MGSDRgaussians dLdGaussians;
+	dLdGaussians.means     = dLdMeans    .data_ptr<float>();
+	dLdGaussians.scales    = dLdScales   .data_ptr<float>();
+	dLdGaussians.rotations = dLdRotations.data_ptr<float>();
+	dLdGaussians.opacities = dLdOpacities.data_ptr<float>();
+	dLdGaussians.colors    = dLdColors   .data_ptr<float>();
+	dLdGaussians.harmonics = dLdHarmonics.data_ptr<float>();
+
+	//populate gaussians struct:
+	//---------------
+	MGSDRgaussians gaussians;
+	gaussians.count = numGaussians;
+	gaussians.means     = means    .contiguous().data_ptr<float>();
+	gaussians.scales    = scales   .contiguous().data_ptr<float>();
+	gaussians.rotations = rotations.contiguous().data_ptr<float>();
+	gaussians.opacities = opacities.contiguous().data_ptr<float>();
+	gaussians.colors    = colors   .contiguous().data_ptr<float>();
+	gaussians.harmonics = harmonics.contiguous().data_ptr<float>();
 
 	//render:
 	//---------------
 	mgs_dr_backward_cuda(
-		cSettings,
-		dLdImage.contiguous().data_ptr<float>(),
-
-		numGaussians,
-		means    .contiguous().data_ptr<float>(),
-		scales   .contiguous().data_ptr<float>(),
-		rotations.contiguous().data_ptr<float>(),
-		opacities.contiguous().data_ptr<float>(),
-		colors   .contiguous().data_ptr<float>(),
-		harmonics.contiguous().data_ptr<float>(),
+		cSettings, dLdImage.contiguous().data_ptr<float>(), gaussians,
 
 		numRendered,
 		geomBufs   .data_ptr<uint8_t>(), //should already be contiguous
 		binningBufs.data_ptr<uint8_t>(),
 		imageBufs  .data_ptr<uint8_t>(),
 
-		dLdMeans    .data_ptr<float>(),
-		dLdScales   .data_ptr<float>(),
-		dLdRotations.data_ptr<float>(),
-		dLdOpacities.data_ptr<float>(),
-		dLdColors   .data_ptr<float>(),
-		dLdHarmonics.data_ptr<float>()
+		dLdGaussians
 	);
 
 	//return:

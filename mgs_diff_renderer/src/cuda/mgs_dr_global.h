@@ -27,6 +27,18 @@
 
 //-------------------------------------------//
 
+struct MGSDRgaussians
+{
+	uint32_t count;
+
+	float* __restrict__ means;
+	float* __restrict__ scales;
+	float* __restrict__ rotations;
+	float* __restrict__ opacities;
+	float* __restrict__ colors;
+	float* __restrict__ harmonics;
+};
+
 struct MGSDRsettings
 {
 	uint32_t width;

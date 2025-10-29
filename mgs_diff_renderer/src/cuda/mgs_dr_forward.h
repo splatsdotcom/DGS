@@ -15,8 +15,7 @@ typedef std::function<uint8_t* (uint64_t size)> MGSDRresizeFunc;
 
 //-------------------------------------------//
 
-uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians, 
-                             const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, MGSDRgaussians gaussians,
                              MGSDRresizeFunc createGeomBuf, MGSDRresizeFunc createBinningBuf, MGSDRresizeFunc createImageBuf,
                              float* outImg);
 
