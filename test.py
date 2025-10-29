@@ -80,23 +80,23 @@ def main():
 	eye = torch.tensor([0.0, 0.0, 3.0])
 	target = torch.tensor([0.0, 0.0, 0.0])
 	up = torch.tensor([0.0, 1.0, 0.0])
-	view = look_at(eye, target, up)
+	view = torch.eye(4)#look_at(eye, target, up)
 
 	fovy = math.radians(60)
-	proj = perspective(fovy, aspect, 0.1, 100.0)
+	proj = torch.eye(4)#perspective(fovy, aspect, 0.1, 100.0)
 	focalX = width / (2 * math.tan(fovy / 2))
 	focalY = focalX
 
-	means = torch.tensor([[0.25, 0.0, 0.0],
-						  [-0.25, 0.1, 0.1]],
+	means = torch.tensor([[0.0, 0.0, 1.0],
+						  [0.0, 0.0, -1.0]],
 						 dtype=torch.float32, device='cuda', requires_grad=True)
-	scales = torch.tensor([[0.2, 0.02, 0.02],
-						   [0.3, 0.1, 0.1]], dtype=torch.float32, device='cuda', requires_grad=True)
-	rotations = torch.tensor([[0.0, 0.0, 0.0, 1.0],
-							  [0.0, 0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
+	scales = torch.tensor([[0.1, 0.1, 0.1],
+						   [0.1, 0.1, 0.1]], dtype=torch.float32, device='cuda', requires_grad=True)
+	rotations = torch.tensor([[1.0, 0.0, 0.0, 0.0],
+							  [1.0, 0.0, 0.0, 0.0]], dtype=torch.float32, device='cuda', requires_grad=True)
 	opacities = torch.tensor([[1.0], [1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
-	colors = torch.tensor([[0.0, 1.0, 0.0],
-						   [0.0, 0.0, 1.0]], dtype=torch.float32, device='cuda', requires_grad=True)
+	colors = torch.tensor([[0.0, 0.0, 1.0],
+						   [0.0, 1.0, 0.0]], dtype=torch.float32, device='cuda', requires_grad=True)
 	harmonics = torch.zeros((2, 15, 3), dtype=torch.float32, device='cuda', requires_grad=True)
 
 	y = mgs_diff_renderer.render(width, height, view, proj, focalX, focalY,

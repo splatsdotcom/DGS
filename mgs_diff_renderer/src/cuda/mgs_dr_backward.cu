@@ -18,23 +18,22 @@ namespace cg = cooperative_groups;
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
-_mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
+_mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
                               const uint2* ranges, const uint32_t* indices, const MGSDRgeomBuffers geom,
                               MGSDRderivativeBuffers outIntermediate, float* outDLdOpacities);
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
-                                   uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
+                                   const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
 								   const MGSDRgeomBuffers geom, const MGSDRderivativeBuffers intermediate,
                                    float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics);
 
 //-------------------------------------------//
 
-void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage, const float* view, const float* proj, float focalX, float focalY,
-						  uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-						  uint32_t numRendered, const uint8_t* geomBufsMem, const uint8_t* binningBufsMem, const uint8_t* imageBufsMem,
-						  float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics,
-						  bool debug)
+void mgs_dr_backward_cuda(MGSDRsettings settings, const float* dLdImage, uint32_t numGaussians, 
+                          const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+                          uint32_t numRendered, const uint8_t* geomBufsMem, const uint8_t* binningBufsMem, const uint8_t* imageBufsMem,
+                          float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdOpacities, float* outDLdColors, float* outDLdHarmonics)
 {
 	//validate:
 	//---------------
@@ -49,8 +48,8 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 	//---------------
 	MGS_DR_PROFILE_REGION_START(initMem);
 
-	uint32_t tilesWidth  = _mgs_ceildivide32(width , MGS_DR_TILE_SIZE);
-	uint32_t tilesHeight = _mgs_ceildivide32(height, MGS_DR_TILE_SIZE);
+	uint32_t tilesWidth  = _mgs_ceildivide32(settings.width , MGS_DR_TILE_SIZE);
+	uint32_t tilesHeight = _mgs_ceildivide32(settings.height, MGS_DR_TILE_SIZE);
 
 	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
 		(uint8_t*)geomBufsMem, numGaussians
@@ -59,7 +58,7 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 		(uint8_t*)binningBufsMem, numRendered
 	));
 	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
-		(uint8_t*)imageBufsMem, width * height
+		(uint8_t*)imageBufsMem, settings.width * settings.height
 	));
 
 	MGS_DR_PROFILE_REGION_END(initMem);
@@ -85,7 +84,7 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 	MGS_DR_PROFILE_REGION_START(rasterize);
 
 	_mgs_dr_backward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
-		width, height, dLdImage, imageBufs.accumAlpha, imageBufs.numContributors,
+		settings, dLdImage, imageBufs.accumAlpha, imageBufs.numContributors,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs,
 		intermediateDerivs, outDLdOpacities
 	);
@@ -99,8 +98,8 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 
 	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_backward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
-		width, height, view, proj, focalX, focalY,
-		numGaussians, means, scales, rotations, opacities, colors, harmonics,
+		settings, numGaussians, 
+		means, scales, rotations, opacities, colors, harmonics,
 		geomBufs, intermediateDerivs,
 		outDLdMeans, outDLdScales, outDLdRotations, outDLdColors, outDLdHarmonics
 	);
@@ -130,27 +129,27 @@ void mgs_dr_backward_cuda(uint32_t width, uint32_t height, const float* dLdImage
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
-_mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
+_mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const float* transmittances, const uint32_t* numContributors,
                               const uint2* ranges, const uint32_t* indices, const MGSDRgeomBuffers geom,
                               MGSDRderivativeBuffers outIntermediate, float* outDLdOpacities)
 {
 	//compute pixel position:
 	//---------------
 	auto block = cg::this_thread_block();
-	uint32_t tilesWidth = _mgs_ceildivide32(width, MGS_DR_TILE_SIZE);
+	uint32_t tilesWidth = _mgs_ceildivide32(settings.width, MGS_DR_TILE_SIZE);
 
 	uint32_t pixelMinX = block.group_index().x * MGS_DR_TILE_SIZE;
 	uint32_t pixelMinY = block.group_index().y * MGS_DR_TILE_SIZE;
 
-	uint32_t pixelMaxX = min(pixelMinX + MGS_DR_TILE_SIZE, width );
-	uint32_t pixelMaxY = min(pixelMinY + MGS_DR_TILE_SIZE, height);
+	uint32_t pixelMaxX = min(pixelMinX + MGS_DR_TILE_SIZE, settings.width );
+	uint32_t pixelMaxY = min(pixelMinY + MGS_DR_TILE_SIZE, settings.height);
 
 	uint32_t pixelX = pixelMinX + block.thread_index().x;
 	uint32_t pixelY = pixelMinY + block.thread_index().y;
 	
-	uint32_t pixelId = pixelX + width * pixelY;
+	uint32_t pixelId = pixelX + settings.width * pixelY;
 
-	bool inside = pixelX < width && pixelY < height;
+	bool inside = pixelX < settings.width && pixelY < settings.height;
 
 	//read gaussian range:
 	//---------------
@@ -336,10 +335,8 @@ _mgs_dr_backward_splat_kernel(uint32_t width, uint32_t height, const float* dLdI
 	}
 }
 
-
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY,
-                                   uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
                                    const MGSDRgeomBuffers geom, const MGSDRderivativeBuffers intermediate,
                                    float* outDLdMeans, float* outDLdScales, float* outDLdRotations, float* outDLdColors, float* outDLdHarmonics)
 {
@@ -349,18 +346,15 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 
 	//find view + clip pos:
 	//---------------
-	QMmat4 viewMat = qm_mat4_load_row_major(view);
-	QMmat4 projMat = qm_mat4_load_row_major(proj);
-	
 	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
 
 	QMvec4 camPos = qm_mat4_mult_vec4(
-		viewMat, 
+		settings.view, 
 		(QMvec4){ mean.x, mean.y, mean.z, 1.0f }
 	);
 
 	QMvec4 clipPos = qm_mat4_mult_vec4(
-		projMat, camPos
+		settings.proj, camPos
 	);
 
 	//project covariance matrix to 2D:
@@ -372,12 +366,12 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	}};
 	
 	QMmat3 J = {{
-		{ -focalX / camPos.z, 0.0,                 (focalX * camPos.x) / (camPos.z * camPos.z) },
-		{ 0.0,                -focalY / camPos.z,  (focalY * camPos.y) / (camPos.z * camPos.z) },
-		{ 0.0,                0.0,                 0.0                                         }
+		{ -settings.focalX / camPos.z, 0.0,                         (settings.focalX * camPos.x) / (camPos.z * camPos.z) },
+		{ 0.0,                         -settings.focalY / camPos.z, (settings.focalY * camPos.y) / (camPos.z * camPos.z) },
+		{ 0.0,                         0.0,                         0.0                                                  }
 	}};
 
-	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(viewMat));
+	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(settings.view));
 	QMmat3 T = qm_mat3_mult(W, J);
 
 	QMmat3 cov2d = qm_mat3_mult(
@@ -445,26 +439,28 @@ _mgs_dr_backward_preprocess_kernel(uint32_t width, uint32_t height, const float*
 	float invCamZ2 = invCamZ * invCamZ;
 	float invCamZ3 = invCamZ * invCamZ * invCamZ;
 
-	float dLdCamPosX = focalX * invCamZ2 * dLdJ02;
-	float dLdCamPosY = focalY * invCamZ2 * dLdJ12;
-	float dLdCamPosZ = focalX * invCamZ2 * dLdJ00 + focalY * invCamZ2 * dLdJ11 - (2.0f * focalX * camPos.x) * invCamZ3 * dLdJ02 - (2.0f * focalY * camPos.y) * invCamZ3 * dLdJ12;
+	float dLdCamPosX = settings.focalX * invCamZ2 * dLdJ02;
+	float dLdCamPosY = settings.focalY * invCamZ2 * dLdJ12;
+	float dLdCamPosZ = settings.focalX * invCamZ2 * dLdJ00 + settings.focalY * invCamZ2 * dLdJ11 - 
+		(2.0f * settings.focalX * camPos.x) * invCamZ3 * dLdJ02 - 
+		(2.0f * settings.focalY * camPos.y) * invCamZ3 * dLdJ12;
 
 	//this is only part of dLdMean (how it affects the jacobian), dLdMean w.r.t. dLdPixCenters will be computed later
 	QMvec4 dLdMeanJ = qm_mat4_mult_vec4(
-		qm_mat4_transpose(viewMat), //same as inverse for rotation part, ignoring translation
+		qm_mat4_transpose(settings.view), //same as inverse for rotation part, ignoring translation
 		(QMvec4){ (float)dLdCamPosX, (float)dLdCamPosY, (float)dLdCamPosZ, 0.0f } 
 	);
 
 	//compute gradients w.r.t. mean (where the mean affects screenspace position):
 	//---------------
-	QMmat4 PV = qm_mat4_mult(projMat, viewMat);
+	QMmat4 PV = qm_mat4_mult(settings.proj, settings.view);
 
 	float invClipW = 1.0f / (clipPos.w + 0.000001f);
 	float invClipW2 = invClipW * invClipW;
 	
 	QMvec2 dLdClipPos = {
-		intermediate.dLdPixCenters[idx].x * width  * 0.5f,
-		intermediate.dLdPixCenters[idx].y * height * 0.5f,
+		intermediate.dLdPixCenters[idx].x * settings.width  * 0.5f,
+		intermediate.dLdPixCenters[idx].y * settings.height * 0.5f,
 	};
 
 	QMvec3 dLdMeanScreenspace;

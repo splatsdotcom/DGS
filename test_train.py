@@ -40,10 +40,10 @@ def perspective(fovy, aspect, znear, zfar):
 # Renderer wrapper
 # -------------------------------------------------------------
 
-def render_scene(width, height, view, proj, focalX, focalY, means, scales, rotations, opacities, colors, harmonics):
+def render_scene(settings, means, scales, rotations, opacities, colors, harmonics):
 	rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True).clamp(min=1e-8)
 	return mgs_diff_renderer.render(
-		width, height, view, proj, focalX, focalY,
+		settings,
 		means, scales, rotations, opacities, colors, harmonics
 	)
 	
@@ -126,11 +126,19 @@ def main():
 		target = torch.tensor([0.0, 0.0, 0.0], device='cuda')
 		up = torch.tensor([0.0, 1.0, 0.0], device='cuda')
 		view = look_at(eye, target, up)
+
+		settings = mgs_diff_renderer.Settings(
+			width=width, height=height,
+			view=view, proj=proj,
+			focalX=focalX, focalY=focalY,
+			debug=False
+		)
+
 		with torch.no_grad():
-			img = render_scene(width, height, view, proj, focalX, focalY,
+			img = render_scene(settings,
 							   gt_means, gt_scales, gt_rotations,
 							   gt_opacities, gt_colors, gt_harmonics)
-		gt_views.append((view, img))
+		gt_views.append((settings, img))
 		img_np = (img.detach().cpu().clamp(0, 1).numpy() * 255).astype(np.uint8)
 		Image.fromarray(img_np, mode='RGB').save(f"renders/gt_view_{i}.png")
 
@@ -154,8 +162,8 @@ def main():
 		total_loss = 0.0
 
 		# Multi-view consistency loss
-		for (view, gt_img) in gt_views:
-			pred_img = render_scene(width, height, view, proj, focalX, focalY,
+		for (settings, gt_img) in gt_views:
+			pred_img = render_scene(settings,
 									means, scales, rotations, opacities, colors, harmonics)
 			loss = torch.nn.functional.mse_loss(pred_img, gt_img)
 			total_loss += loss
@@ -165,30 +173,31 @@ def main():
 
 		# if step % 10 == 0:
 		# 	with torch.no_grad():
-		# 		grad_analytical = scales.grad.detach().clone()
-		# 		grad_fd = finite_difference_gradcheck(
-		# 			gt_views, width, height, proj, focalX, focalY,
-		# 			( means, scales, rotations, opacities, colors, harmonics ), 1
-		# 		)
+		# 		for eps in [1e-3, 1e-4, 1e-5]:
+		# 			grad_analytical = scales.grad.detach().clone()
+		# 			grad_fd = finite_difference_gradcheck(
+		# 				gt_views, width, height, proj, focalX, focalY,
+		# 				( means, scales, rotations, opacities, colors, harmonics ), 1, eps
+		# 			)
 
-		# 		diff = (grad_fd - grad_analytical).abs()
-		# 		rel_err = diff / (grad_analytical.abs() + 1e-8)
+		# 			diff = (grad_fd - grad_analytical).abs()
+		# 			rel_err = diff / grad_analytical.abs()
 
-		# 		# print("Analytical grad norm:", grad_analytical.norm().item())
-		# 		# print("FD grad norm:", grad_fd.norm().item())
-		# 		# print("Max abs diff:", diff.max().item())
-		# 		print("Max rel err:", rel_err.max().item())
+		# 			# print("Analytical grad norm:", grad_analytical.norm().item())
+		# 			# print("FD grad norm:", grad_fd.norm().item())
+		# 			# print("Max abs diff:", diff.max().item())
+		# 			print(f"Max rel err eps={eps}:", rel_err.max().item())
 
 		# 		# Optionally: print full arrays for detailed inspection
-		# 		print("Grad analytical:\n", grad_analytical)
-		# 		print("Grad FD:\n", grad_fd)
-		# 		print("Rel error:\n", rel_err)
+		# 		# print("Grad analytical:\n", grad_analytical)
+		# 		# print("Grad FD:\n", grad_fd)
+		# 		# print("Rel error:\n", rel_err)
 
-		if step % 10 == 0 or step == 199:
+		if step % 10 == 0:
 			print(f"[Step {step:03d}] Loss = {total_loss.item():.6f}")
 			with torch.no_grad():
-				view, _ = gt_views[0]
-				img = render_scene(width, height, view, proj, focalX, focalY,
+				settings, _ = gt_views[0]
+				img = render_scene(settings,
 								   means, scales, rotations, opacities, colors, harmonics)
 				img_np = (img.detach().cpu().clamp(0, 1).numpy() * 255).astype(np.uint8)
 				Image.fromarray(img_np, mode='RGB').save(f"renders/train_step_{step:03d}.png")

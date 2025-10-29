@@ -3,28 +3,34 @@ from . import _C
 
 # ------------------------------------------- #
 
-class _RenderFunction(torch.autograd.Function):
-	
-	@staticmethod
-	def forward(ctx, 
-	            outWidth, outHeight, view, proj, focalX, focalY,
-	            means, scales, rotations, opacities, colors, harmonics,
-	            debug=False):
-		
-		img, numRendered, geomBufs, binningBufs, imageBufs = torch.ops.mgs_diff_renderer.forward(
-			outWidth, outHeight, view, proj, focalX, focalY,
-			means, scales, rotations, opacities, colors, harmonics,
+# just a wrapper for torch.classes.mgs_diff_renderer.Settings
+class Settings:	
+	def __init__(self, width: int, height: int, 
+	             view: torch.Tensor, proj: torch.Tensor, focalX: float, focalY: float,
+				 debug: bool = False):
+
+		self.cSettings = torch.classes.mgs_diff_renderer.Settings(
+			width,
+			height,
+			view,
+			proj,
+			focalX,
+			focalY,
 			debug
 		)
 
-		# TODO: wrap into a single params struct
-		ctx.numRendered = numRendered
-		ctx.focalX = focalX
-		ctx.focalY = focalY
-		ctx.debug = debug
+class RenderFunction(torch.autograd.Function):
+	@staticmethod
+	def forward(ctx, settings: Settings,
+	            means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmonics: torch.Tensor) -> torch.Tensor:
+		
+		img, numRendered, geomBufs, binningBufs, imageBufs = torch.ops.mgs_diff_renderer.forward(
+			settings.cSettings, means, scales, rotations, opacities, colors, harmonics
+		)
 
+		ctx.numRendered = numRendered
+		ctx.settings = settings
 		ctx.save_for_backward(
-			view, proj, 
 			means, scales, rotations, opacities, colors, harmonics,
 			geomBufs, binningBufs, imageBufs
 		)
@@ -33,37 +39,30 @@ class _RenderFunction(torch.autograd.Function):
 
 	@staticmethod
 	def backward(ctx, grad_output):
-		view, proj, means, scales, rotations, opacities, colors, harmonics, geomBufs, binningBufs, imageBufs = ctx.saved_tensors
+		means, scales, rotations, opacities, colors, harmonics, geomBufs, binningBufs, imageBufs = ctx.saved_tensors
 
 		dMean, dScales, dRotations, dOpacities, dColors, dHarmonics = torch.ops.mgs_diff_renderer.backward(
-			grad_output, view, proj, ctx.focalX, ctx.focalY,
+			ctx.settings.cSettings, grad_output,
 			means, scales, rotations, opacities, colors, harmonics,
-			ctx.numRendered, geomBufs, binningBufs, imageBufs,
-			ctx.debug
+			ctx.numRendered, geomBufs, binningBufs, imageBufs
 		)
 
 		return (
-			None,        # outWidth
-			None,        # outHeight
-			None,        # view
-			None,        # proj
-			None,        # focalX
-			None,        # focalY
-			dMean,       # means
-			dScales,     # scales
-			dRotations,  # rotations
-			dOpacities,  # opacities
-			dColors,     # colors
-			dHarmonics,  # harmonics
-			None         # debug
+			None,       # settings
+			dMean,      # means
+			dScales,    # scales
+			dRotations, # rotations
+			dOpacities, # opacities
+			dColors,    # colors
+			dHarmonics  # harmonics
 		)
 
-def render(outWidth: int, outHeight: int, view: torch.Tensor, proj: torch.Tensor, focalX: float, focalY: float,
-		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmomics: torch.Tensor,
-		   debug: bool = False) -> torch.Tensor:
+# ------------------------------------------- #
 
-	return _RenderFunction.apply(
-		outWidth, outHeight, view, proj, focalX, focalY,
-		means, scales, rotations, opacities, colors, harmomics,
-		debug
+def render(settings: Settings,
+		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmomics: torch.Tensor) -> torch.Tensor:
+
+	return RenderFunction.apply(
+		settings,
+		means, scales, rotations, opacities, colors, harmomics
 	)

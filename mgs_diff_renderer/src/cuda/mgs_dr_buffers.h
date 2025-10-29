@@ -11,9 +11,6 @@
 #include <stdint.h>
 #include "mgs_dr_global.h"
 
-#define QM_FUNC_ATTRIBS __device__ static inline
-#include "../external/QuickMath/quickmath.h"
-
 //-------------------------------------------//
 
 #define MGS_DR_L1_CACHE_ALIGNMENT 128

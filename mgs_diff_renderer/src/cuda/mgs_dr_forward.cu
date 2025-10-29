@@ -25,8 +25,8 @@ namespace cg = cooperative_groups;
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
-                                 uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
+                                 const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
                                  MGSDRgeomBuffers outGeom);
 
 __global__ static void __launch_bounds__(MGS_DR_KEY_WRITE_WORKGROUP_SIZE)
@@ -38,7 +38,7 @@ __global__ static void __launch_bounds__(MGS_DR_FIND_TILE_RANGES_WORKGROUP_SIZE)
 _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* keys, uint2* outRanges);
 
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN) 
-_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
+_mgs_dr_forward_splat_kernel(MGSDRsettings settings, 
                              const uint2* ranges, const uint32_t* indices, const MGSDRgeomBuffers geom,
                              float* outColor, float* outAccumAlpha, uint32_t* outNumContributors);
 
@@ -46,10 +46,10 @@ __device__ static void _mgs_dr_get_tile_bounds(uint32_t width, uint32_t height, 
 
 //-------------------------------------------//
 
-uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outImg, const float* view, const float* proj, float focalX, float focalY,
-                             uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
-                             std::function<uint8_t* (uint64_t size)> createGeomBuf, std::function<uint8_t* (uint64_t size)> createBinningBuf, std::function<uint8_t* (uint64_t size)> createImageBuf,
-                             bool debug)
+uint32_t mgs_dr_forward_cuda(MGSDRsettings settings, uint32_t numGaussians, 
+                             const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+                             MGSDRresizeFunc createGeomBuf, MGSDRresizeFunc createBinningBuf, MGSDRresizeFunc createImageBuf,
+                             float* outImg)
 {
 	//validate:
 	//---------------
@@ -64,22 +64,22 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	//---------------
 	MGS_DR_PROFILE_REGION_START(allocateGeomImage);
 
-	uint32_t tilesWidth  = _mgs_ceildivide32(outWidth , MGS_DR_TILE_SIZE);
-	uint32_t tilesHeight = _mgs_ceildivide32(outHeight, MGS_DR_TILE_SIZE);
+	uint32_t tilesWidth  = _mgs_ceildivide32(settings.width , MGS_DR_TILE_SIZE);
+	uint32_t tilesHeight = _mgs_ceildivide32(settings.height, MGS_DR_TILE_SIZE);
 	uint32_t tilesLen = tilesWidth * tilesHeight;
 
 	uint8_t* geomBufMem = createGeomBuf(
 		MGSDRrenderBuffers::required_mem<MGSDRgeomBuffers>(numGaussians)
 	);
 	uint8_t* imageBufMem = createImageBuf(
-		MGSDRimageBuffers::required_mem<MGSDRimageBuffers>(outWidth * outHeight)
+		MGSDRimageBuffers::required_mem<MGSDRimageBuffers>(settings.width * settings.height)
 	);
 	
 	MGSDRgeomBuffers geomBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRgeomBuffers(
 		geomBufMem, numGaussians
 	));
 	MGSDRimageBuffers imageBufs = MGS_DR_CUDA_ERROR_CHECK(MGSDRimageBuffers(
-		imageBufMem, outWidth * outHeight
+		imageBufMem, settings.width * settings.height
 	));
 
 	MGS_DR_PROFILE_REGION_END(allocateGeomImage);
@@ -90,8 +90,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 
 	uint32_t numWorkgroupsPreprocess = _mgs_ceildivide32(numGaussians, MGS_DR_PREPROCESS_WORKGROUP_SIZE);
 	_mgs_dr_foward_preprocess_kernel<<<numWorkgroupsPreprocess, MGS_DR_PREPROCESS_WORKGROUP_SIZE>>>(
-		outWidth, outHeight, view, proj, focalX, focalY,
-		numGaussians, means, scales, rotations, opacities, colors, harmonics,
+		settings, numGaussians, means, scales, rotations, opacities, colors, harmonics,
 		geomBufs
 	);
 	MGS_DR_CUDA_ERROR_CHECK();
@@ -136,7 +135,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 
 	uint32_t numWorkgroupsWriteKeys = _mgs_ceildivide32(numGaussians, MGS_DR_KEY_WRITE_WORKGROUP_SIZE);
 	_mgs_dr_forward_write_keys_kernel<<<numWorkgroupsWriteKeys, MGS_DR_KEY_WRITE_WORKGROUP_SIZE>>>(
-		outWidth, outHeight,
+		settings.width, settings.height,
 		numGaussians, geomBufs,
 		binningBufs.keys, binningBufs.indices
 	);
@@ -184,7 +183,7 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 	MGS_DR_PROFILE_REGION_START(splat);
 
 	_mgs_dr_forward_splat_kernel<<<{ tilesWidth, tilesHeight }, { MGS_DR_TILE_SIZE, MGS_DR_TILE_SIZE }>>>(
-		outWidth, outHeight,
+		settings,
 		imageBufs.tileRanges, binningBufs.indicesSorted, geomBufs,
 		outImg, imageBufs.accumAlpha, imageBufs.numContributors
 	);
@@ -218,8 +217,8 @@ uint32_t mgs_dr_forward_cuda(uint32_t outWidth, uint32_t outHeight, float* outIm
 //-------------------------------------------//
 
 __global__ static void __launch_bounds__(MGS_DR_PREPROCESS_WORKGROUP_SIZE)
-_mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* view, const float* proj, float focalX, float focalY, 
-                                 uint32_t numGaussians, const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
+_mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, uint32_t numGaussians, 
+                                 const float* means, const float* scales, const float* rotations, const float* opacities, const float* colors, const float* harmonics,
                                  MGSDRgeomBuffers outGeom)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -231,17 +230,14 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 
 	//find view and clip pos:
 	//---------------
-	QMmat4 viewMat = qm_mat4_load_row_major(view);
-	QMmat4 projMat = qm_mat4_load_row_major(proj);
-	
 	QMvec3 mean = qm_vec3_load(&means[idx * 3]);
 
 	QMvec4 camPos = qm_mat4_mult_vec4(
-		viewMat, 
+		settings.view, 
 		(QMvec4){ mean.x, mean.y, mean.z, 1.0f }
 	);
 	QMvec4 clipPos = qm_mat4_mult_vec4(
-		projMat, camPos
+		settings.proj, camPos
 	);
 
 	//cull gaussians out of view:
@@ -265,12 +261,12 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	//project covariance matrix to 2D:
 	//---------------
 	QMmat3 J = {{
-		{ -focalX / camPos.z, 0.0,                 (focalX * camPos.x) / (camPos.z * camPos.z) },
-		{ 0.0,                -focalY / camPos.z,  (focalY * camPos.y) / (camPos.z * camPos.z) },
-		{ 0.0,                0.0,                 0.0                                         }
+		{ -settings.focalX / camPos.z, 0.0,                         (settings.focalX * camPos.x) / (camPos.z * camPos.z) },
+		{ 0.0,                         -settings.focalY / camPos.z, (settings.focalY * camPos.y) / (camPos.z * camPos.z) },
+		{ 0.0,                         0.0,                         0.0                                                  }
 	}};
 
-	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(viewMat));
+	QMmat3 W = qm_mat3_transpose(qm_mat4_top_left(settings.view));
 	QMmat3 T = qm_mat3_mult(W, J);
 
 	QMmat3 cov2d = qm_mat3_mult(
@@ -297,8 +293,8 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 	//compute image tiles:
 	//---------------
 	QMvec2 pixCenter = {
-		((clipPos.x / clipPos.w + 1.0f) * 0.5f * width ) - 0.5f,
-		((clipPos.y / clipPos.w + 1.0f) * 0.5f * height) - 0.5f
+		((clipPos.x / clipPos.w + 1.0f) * 0.5f * settings.width ) - 0.5f,
+		((clipPos.y / clipPos.w + 1.0f) * 0.5f * settings.height) - 0.5f
 	};
 
 	//TODO: tweak
@@ -306,7 +302,7 @@ _mgs_dr_foward_preprocess_kernel(uint32_t width, uint32_t height, const float* v
 
 	uint2 tilesMin, tilesMax;
 	_mgs_dr_get_tile_bounds(
-		width, height, pixCenter, pixRadius,
+		settings.width, settings.height, pixCenter, pixRadius,
 		tilesMin, tilesMax
 	);
 
@@ -395,27 +391,27 @@ _mgs_dr_forward_find_tile_ranges_kernel(uint32_t numRendered, const uint64_t* ke
 }
 
 __global__ static void __launch_bounds__(MGS_DR_TILE_LEN)
-_mgs_dr_forward_splat_kernel(uint32_t width, uint32_t height, 
+_mgs_dr_forward_splat_kernel(MGSDRsettings settings, 
                              const uint2* ranges, const uint32_t* indices, const MGSDRgeomBuffers geom,
                              float* outColor, float* outAccumAlpha, uint32_t* outNumContributors)
 {
 	//compute pixel position:
 	//---------------
 	auto block = cg::this_thread_block();
-	uint32_t tilesWidth = _mgs_ceildivide32(width, MGS_DR_TILE_SIZE);
+	uint32_t tilesWidth = _mgs_ceildivide32(settings.width, MGS_DR_TILE_SIZE);
 
 	uint32_t pixelMinX = block.group_index().x * MGS_DR_TILE_SIZE;
 	uint32_t pixelMinY = block.group_index().y * MGS_DR_TILE_SIZE;
 
-	uint32_t pixelMaxX = min(pixelMinX + MGS_DR_TILE_SIZE, width );
-	uint32_t pixelMaxY = min(pixelMinY + MGS_DR_TILE_SIZE, height);
+	uint32_t pixelMaxX = min(pixelMinX + MGS_DR_TILE_SIZE, settings.width );
+	uint32_t pixelMaxY = min(pixelMinY + MGS_DR_TILE_SIZE, settings.height);
 
 	uint32_t pixelX = pixelMinX + block.thread_index().x;
 	uint32_t pixelY = pixelMinY + block.thread_index().y;
 	
-	uint32_t pixelId = pixelX + width * pixelY;
+	uint32_t pixelId = pixelX + settings.width * pixelY;
 
-	bool inside = pixelX < width && pixelY < height;
+	bool inside = pixelX < settings.width && pixelY < settings.height;
 
 	//read gaussian range:
 	//---------------

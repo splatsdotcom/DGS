@@ -12,6 +12,9 @@
 #include <stdexcept>
 #include <chrono>
 
+#define QM_FUNC_ATTRIBS __device__ static inline
+#include "../external/QuickMath/quickmath.h"
+
 // only enable for personal testing:
 // #define MGS_DR_PROFILE
 
@@ -23,6 +26,21 @@
 #define MGS_DR_ACCUM_ALPHA_CUTOFF 0.00001f
 
 //-------------------------------------------//
+
+struct MGSDRsettings
+{
+	uint32_t width;
+	uint32_t height;
+
+	QMmat4 view;
+	QMmat4 proj;
+	QMmat4 viewProj;
+
+	float focalX;
+	float focalY;
+
+	bool debug;
+};
 
 struct MGSDRcov3D
 {
@@ -42,7 +60,7 @@ __device__ __host__ static __forceinline__ uint32_t _mgs_ceildivide32(uint32_t a
 
 #define MGS_DR_CUDA_ERROR_CHECK(s)                                        \
 	s;                                                                    \
-	if(debug)                                                             \
+	if(settings.debug)                                                    \
 	{                                                                     \
 		cudaError error = cudaDeviceSynchronize();                        \
 		if(error != cudaSuccess)                                          \
