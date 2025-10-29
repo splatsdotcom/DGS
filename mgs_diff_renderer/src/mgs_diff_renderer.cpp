@@ -79,7 +79,7 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 	torch::TensorOptions byteOpts(torch::kByte);
 	torch::Device device(torch::kCUDA);
 
-	at::Tensor outImage = torch::full({ cSettings.width, cSettings.height, 3 }, 0.0f, floatOpts.device(device));
+	at::Tensor outImage = torch::full({ cSettings.height, cSettings.width, 3 }, 0.0f, floatOpts.device(device));
 
 	at::Tensor geomBuf    = torch::empty({0}, byteOpts.device(device));
 	at::Tensor binningBuf = torch::empty({0}, byteOpts.device(device));
