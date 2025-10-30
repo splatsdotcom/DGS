@@ -18,6 +18,29 @@ MGSDRresizeFunc _mgs_dr_tensor_resize_function(at::Tensor& tensor)
     };
 }
 
+uint32_t _mgs_dr_validate_gaussians(const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics)
+{
+	if(means.dtype() != torch::kFloat32 || scales.dtype() != torch::kFloat32 || rotations.dtype() != torch::kFloat32 || opacities.dtype() != torch::kFloat32 || harmonics.dtype() != torch::kFloat32)
+		throw std::invalid_argument("Inputs must be float32");
+	if(means.device().type() != torch::kCUDA || scales.device().type() != torch::kCUDA || rotations.device().type() != torch::kCUDA || opacities.device().type() != torch::kCUDA || harmonics.device().type() != torch::kCUDA)
+		throw std::invalid_argument("Inputs must be in CUDA memory");
+
+	int64_t numGaussians = means.size(0);
+
+	if(means    .dim() != 2 || means    .size(0) != numGaussians || means    .size(1) != 3)
+		throw std::invalid_argument("Means must have shape (numGaussians, 3)");
+	if(scales   .dim() != 2 || scales   .size(0) != numGaussians || scales   .size(1) != 3)
+		throw std::invalid_argument("Scales must have shape (numGaussians, 3)");
+	if(rotations.dim() != 2 || rotations.size(0) != numGaussians || rotations.size(1) != 4)
+		throw std::invalid_argument("Rotations must have shape (numGaussians, 4)");
+	if(opacities.dim() != 2 || opacities.size(0) != numGaussians || opacities.size(1) != 1)
+		throw std::invalid_argument("Opacities must have shape (numGaussians, 1)");
+	if(harmonics.dim() != 3 || harmonics.size(0) != numGaussians || harmonics.size(2) != 3)
+		throw std::invalid_argument("Harmonics must have shape (numGaussians, (degree + 1)^2, 3)");
+
+	return (uint32_t)numGaussians;
+}
+
 //-------------------------------------------//
 
 class MGSDRsettingsTorch : public torch::CustomClassHolder
@@ -67,11 +90,7 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 
 	//validate:
 	//---------------
-	uint32_t numGaussians = (uint32_t)means.size(0);
-
-	//TODO
-
-	//ensure outputs are contiguous
+	uint32_t numGaussians = _mgs_dr_validate_gaussians(means, scales, rotations, opacities, harmonics);
 
 	//allocate output tensors:
 	//---------------
@@ -79,7 +98,7 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 	torch::TensorOptions byteOpts(torch::kByte);
 	torch::Device device(torch::kCUDA);
 
-	at::Tensor outImage = torch::full({ cSettings.height, cSettings.width, 3 }, 0.0f, floatOpts.device(device));
+	at::Tensor outImage = torch::full({ cSettings.height, cSettings.width, 3 }, 0.0f, floatOpts.device(device)).contiguous();
 
 	at::Tensor geomBuf    = torch::empty({0}, byteOpts.device(device));
 	at::Tensor binningBuf = torch::empty({0}, byteOpts.device(device));
@@ -115,7 +134,6 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 	};
 }
 
-//TODO: have this take in / return a struct, not a giant tuple
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at::Tensor& dLdImage,
                 const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics,
@@ -125,12 +143,10 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 
 	//validate:
 	//---------------
-	uint32_t numGaussians = (uint32_t)means.size(0);
+	uint32_t numGaussians = _mgs_dr_validate_gaussians(means, scales, rotations, opacities, harmonics);
 
-	uint32_t width  = (uint32_t)dLdImage.size(1);
-	uint32_t height = (uint32_t)dLdImage.size(0);
-
-	//TODO
+	if(dLdImage.dim() != 3 || (uint32_t)dLdImage.size(0) != cSettings.height || (uint32_t)dLdImage.size(1) != cSettings.width || dLdImage.size(2) != 3)
+		throw std::invalid_argument("dLdImage must have shape (height, width, 3)");
 
 	//allocate output tensors:
 	//---------------

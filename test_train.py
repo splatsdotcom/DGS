@@ -83,7 +83,7 @@ def main():
 
 	gtHarmonics = torch.tensor([
 		[ [1.0, 0.0, 0.0] ],
-		[ [0.0, 1.0, 0.0] ],
+		[ [0.0, 1.0, 0.0] ], # currently harmonics is just treated as RGB color
 		[ [0.0, 0.0, 1.0] ]
 	], dtype=torch.float32, device='cuda')
 
