@@ -22,16 +22,16 @@ class Settings:
 class RenderFunction(torch.autograd.Function):
 	@staticmethod
 	def forward(ctx, settings: Settings,
-	            means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmonics: torch.Tensor) -> torch.Tensor:
+	            means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, harmonics: torch.Tensor) -> torch.Tensor:
 		
 		img, numRendered, geomBufs, binningBufs, imageBufs = torch.ops.mgs_diff_renderer.forward(
-			settings.cSettings, means, scales, rotations, opacities, colors, harmonics
+			settings.cSettings, means, scales, rotations, opacities, harmonics
 		)
 
 		ctx.numRendered = numRendered
 		ctx.settings = settings
 		ctx.save_for_backward(
-			means, scales, rotations, opacities, colors, harmonics,
+			means, scales, rotations, opacities, harmonics,
 			geomBufs, binningBufs, imageBufs
 		)
 
@@ -39,11 +39,11 @@ class RenderFunction(torch.autograd.Function):
 
 	@staticmethod
 	def backward(ctx, grad_output):
-		means, scales, rotations, opacities, colors, harmonics, geomBufs, binningBufs, imageBufs = ctx.saved_tensors
+		means, scales, rotations, opacities, harmonics, geomBufs, binningBufs, imageBufs = ctx.saved_tensors
 
-		dMean, dScales, dRotations, dOpacities, dColors, dHarmonics = torch.ops.mgs_diff_renderer.backward(
+		dMean, dScales, dRotations, dOpacities, dHarmonics = torch.ops.mgs_diff_renderer.backward(
 			ctx.settings.cSettings, grad_output,
-			means, scales, rotations, opacities, colors, harmonics,
+			means, scales, rotations, opacities, harmonics,
 			ctx.numRendered, geomBufs, binningBufs, imageBufs
 		)
 
@@ -53,16 +53,15 @@ class RenderFunction(torch.autograd.Function):
 			dScales,    # scales
 			dRotations, # rotations
 			dOpacities, # opacities
-			dColors,    # colors
 			dHarmonics  # harmonics
 		)
 
 # ------------------------------------------- #
 
 def render(settings: Settings,
-		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, colors: torch.Tensor, harmomics: torch.Tensor) -> torch.Tensor:
+		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, harmomics: torch.Tensor) -> torch.Tensor:
 
 	return RenderFunction.apply(
 		settings,
-		means, scales, rotations, opacities, colors, harmomics
+		means, scales, rotations, opacities, harmomics
 	)

@@ -40,11 +40,11 @@ def perspective(fovy, aspect, znear, zfar):
 # Renderer wrapper
 # -------------------------------------------------------------
 
-def render_scene(settings, means, scales, rotations, opacities, colors, harmonics):
+def render_scene(settings, means, scales, rotations, opacities, harmonics):
 	rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True).clamp(min=1e-8)
 	return mgs_diff_renderer.render(
 		settings,
-		means, scales, rotations, opacities, colors, harmonics
+		means, scales, rotations, opacities, harmonics
 	)
 	
 # -------------------------------------------------------------
@@ -110,12 +110,11 @@ def main():
 	], dtype=torch.float32, device='cuda')
 
 	gt_opacities = torch.tensor([[1.0], [1.0], [1.0]], dtype=torch.float32, device='cuda')
-	gt_colors = torch.tensor([
-		[1.0, 0.0, 0.0],
-		[0.0, 1.0, 0.0],
-		[0.0, 0.0, 1.0]
+	gt_harmonics = torch.tensor([
+		[ [1.0, 0.0, 0.0] ],
+		[ [0.0, 1.0, 0.0] ],
+		[ [0.0, 0.0, 1.0] ]
 	], dtype=torch.float32, device='cuda')
-	gt_harmonics = torch.zeros((3, 15, 3), dtype=torch.float32, device='cuda')
 
 	# ---------------- Generate Ground Truth Views ----------------
 	n_views = 10
@@ -137,7 +136,7 @@ def main():
 		with torch.no_grad():
 			img = render_scene(settings,
 							   gt_means, gt_scales, gt_rotations,
-							   gt_opacities, gt_colors, gt_harmonics)
+							   gt_opacities, gt_harmonics)
 		gt_views.append((settings, img))
 		img_np = (img.detach().cpu().clamp(0, 1).numpy() * 255).astype(np.uint8)
 		Image.fromarray(img_np, mode='RGB').save(f"renders/gt_view_{i}.png")
@@ -149,10 +148,9 @@ def main():
 	scales = (gt_scales + 0.1 * torch.randn_like(gt_scales)).clone().detach().requires_grad_(True)
 	rotations = (gt_rotations + 0.5 * torch.randn_like(gt_rotations)).clone().detach().requires_grad_(True)
 	opacities = torch.rand_like(gt_opacities).requires_grad_(True)
-	colors = (torch.rand_like(gt_colors) * 0.5 + gt_colors * 0.5).detach().clone().requires_grad_(True)
-	harmonics = gt_harmonics.detach().clone()
+	harmonics = (torch.rand_like(gt_harmonics) * 0.5 + gt_harmonics * 0.5).detach().clone().requires_grad_(True)
 
-	optimizer = torch.optim.Adam([means, scales, rotations, opacities, colors], lr=1e-2)
+	optimizer = torch.optim.Adam([means, scales, rotations, opacities, harmonics], lr=1e-2)
 
 	# ---------------- Training Loop ----------------
 	start = time.time()
@@ -164,7 +162,7 @@ def main():
 		# Multi-view consistency loss
 		for (settings, gt_img) in gt_views:
 			pred_img = render_scene(settings,
-									means, scales, rotations, opacities, colors, harmonics)
+									means, scales, rotations, opacities, harmonics)
 			loss = torch.nn.functional.mse_loss(pred_img, gt_img)
 			total_loss += loss
 
@@ -198,7 +196,7 @@ def main():
 			with torch.no_grad():
 				settings, _ = gt_views[0]
 				img = render_scene(settings,
-								   means, scales, rotations, opacities, colors, harmonics)
+								   means, scales, rotations, opacities, harmonics)
 				img_np = (img.detach().cpu().clamp(0, 1).numpy() * 255).astype(np.uint8)
 				Image.fromarray(img_np, mode='RGB').save(f"renders/train_step_{step:03d}.png")
 

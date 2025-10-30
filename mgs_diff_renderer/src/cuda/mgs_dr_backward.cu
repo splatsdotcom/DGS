@@ -167,7 +167,7 @@ _mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const
 	__shared__ uint32_t collectedIndices   [MGS_DR_TILE_LEN];
 	__shared__ QMvec2 collectedPixCenters  [MGS_DR_TILE_LEN];
 	__shared__ QMvec4 collectedConicOpacity[MGS_DR_TILE_LEN];
-	__shared__ QMvec3 collectedRGB         [MGS_DR_TILE_LEN];
+	__shared__ QMvec3 collectedColor       [MGS_DR_TILE_LEN];
 
 	//loop over batches:
 	//---------------
@@ -196,7 +196,7 @@ _mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const
 			collectedIndices     [block.thread_rank()] = gaussianIdx;
 			collectedPixCenters  [block.thread_rank()] = geom.pixCenters[gaussianIdx];
 			collectedConicOpacity[block.thread_rank()] = geom.conicOpacity[gaussianIdx];
-			collectedRGB         [block.thread_rank()] = geom.rgb[gaussianIdx];
+			collectedColor       [block.thread_rank()] = geom.color[gaussianIdx];
 		}
 
 		block.sync();
@@ -242,7 +242,7 @@ _mgs_dr_backward_splat_kernel(MGSDRsettings settings, const float* dLdImg, const
 
 				for(uint32_t k = 0; k < 3; k++)
 				{
-					float channel = collectedRGB[j].v[k];
+					float channel = collectedColor[j].v[k];
 					float dLdChannel = dLdPixel.v[k];
 
 					accumColor.v[k] = lastAlpha * lastColor.v[k] + (1.0f - lastAlpha) * accumColor.v[k];
@@ -532,5 +532,5 @@ _mgs_dr_backward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussi
 	qm_vec3_store(dLdMean, &outDLdGaussians.means[idx * 3]);
 	qm_vec3_store(dLdScale, &outDLdGaussians.scales[idx * 3]);
 	qm_quaternion_store(dLdRot, &outDLdGaussians.rotations[idx * 4]);
-	qm_vec3_store(dLdColor, &outDLdGaussians.colors[idx * 3]);
+	qm_vec3_store(dLdColor, &outDLdGaussians.harmonics[idx * 3]);
 }

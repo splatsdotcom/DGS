@@ -61,7 +61,7 @@ public:
 
 std::tuple<at::Tensor, int64_t, at::Tensor, at::Tensor, at::Tensor>
 mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
-               const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& colors, const at::Tensor& harmonics)
+               const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics)
 {
 	MGSDRsettings cSettings = settings->settings;
 
@@ -93,7 +93,6 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 	gaussians.scales    = scales   .contiguous().data_ptr<float>();
 	gaussians.rotations = rotations.contiguous().data_ptr<float>();
 	gaussians.opacities = opacities.contiguous().data_ptr<float>();
-	gaussians.colors    = colors   .contiguous().data_ptr<float>();
 	gaussians.harmonics = harmonics.contiguous().data_ptr<float>();
 
 	//render:
@@ -117,9 +116,9 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 }
 
 //TODO: have this take in / return a struct, not a giant tuple
-std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at::Tensor& dLdImage,
-                const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& colors, const at::Tensor& harmonics,
+                const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics,
 			    int64_t numRendered, const at::Tensor& geomBufs, const at::Tensor& binningBufs, const at::Tensor& imageBufs)
 {
 	MGSDRsettings cSettings = settings->settings;
@@ -139,7 +138,6 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 	at::Tensor dLdScales    = torch::zeros_like(scales)   .contiguous();
 	at::Tensor dLdRotations = torch::zeros_like(rotations).contiguous();
 	at::Tensor dLdOpacities = torch::zeros_like(opacities).contiguous();
-	at::Tensor dLdColors    = torch::zeros_like(colors)   .contiguous();
 	at::Tensor dLdHarmonics = torch::zeros_like(harmonics).contiguous();
 
 	MGSDRgaussians dLdGaussians;
@@ -147,7 +145,6 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 	dLdGaussians.scales    = dLdScales   .data_ptr<float>();
 	dLdGaussians.rotations = dLdRotations.data_ptr<float>();
 	dLdGaussians.opacities = dLdOpacities.data_ptr<float>();
-	dLdGaussians.colors    = dLdColors   .data_ptr<float>();
 	dLdGaussians.harmonics = dLdHarmonics.data_ptr<float>();
 
 	//populate gaussians struct:
@@ -158,7 +155,6 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 	gaussians.scales    = scales   .contiguous().data_ptr<float>();
 	gaussians.rotations = rotations.contiguous().data_ptr<float>();
 	gaussians.opacities = opacities.contiguous().data_ptr<float>();
-	gaussians.colors    = colors   .contiguous().data_ptr<float>();
 	gaussians.harmonics = harmonics.contiguous().data_ptr<float>();
 
 	//render:
@@ -181,7 +177,6 @@ mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at
 		dLdScales,
 		dLdRotations,
 		dLdOpacities,
-		dLdColors,
 		dLdHarmonics
 	};
 }
@@ -209,11 +204,11 @@ TORCH_LIBRARY(mgs_diff_renderer, m)
 		.def(torch::init<int64_t, int64_t, const at::Tensor&, const at::Tensor&, double, double, bool>());
 
 	m.def(
-		"forward(__torch__.torch.classes.mgs_diff_renderer.Settings settings, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor colors, Tensor harmonics) -> (Tensor, int, Tensor, Tensor, Tensor)",
+		"forward(__torch__.torch.classes.mgs_diff_renderer.Settings settings, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor harmonics) -> (Tensor, int, Tensor, Tensor, Tensor)",
 		&mgs_dr_forward
 	);
 	m.def(
-		"backward(__torch__.torch.classes.mgs_diff_renderer.Settings settings, Tensor dLdImage, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor colors, Tensor harmonics, int numRendered, Tensor geomBufs, Tensor binningBufs, Tensor imageBufs) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)",
+		"backward(__torch__.torch.classes.mgs_diff_renderer.Settings settings, Tensor dLdImage, Tensor means, Tensor scales, Tensor rotations, Tensor opacities, Tensor harmonics, int numRendered, Tensor geomBufs, Tensor binningBufs, Tensor imageBufs) -> (Tensor, Tensor, Tensor, Tensor, Tensor)",
 		&mgs_dr_backward
 	);
 }

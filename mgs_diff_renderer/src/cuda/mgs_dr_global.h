@@ -35,7 +35,6 @@ struct MGSDRgaussians
 	float* __restrict__ scales;
 	float* __restrict__ rotations;
 	float* __restrict__ opacities;
-	float* __restrict__ colors;
 	float* __restrict__ harmonics;
 };
 

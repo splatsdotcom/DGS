@@ -305,7 +305,7 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussian
 
 	//compute spherical harmonics:
 	//---------------
-	QMvec3 color = qm_vec3_load(&gaussians.colors[idx * 3]);
+	QMvec3 color = qm_vec3_load(&gaussians.harmonics[idx * 3]);
 
 	//TODO: actual SH
 
@@ -317,7 +317,7 @@ _mgs_dr_foward_preprocess_kernel(MGSDRsettings settings, MGSDRgaussians gaussian
 	outGeom.tilesTouched[idx] = (tilesMax.x - tilesMin.x) * (tilesMax.y - tilesMin.y);
 	outGeom.covs        [idx] = { cov.m[0][0], cov.m[1][0], cov.m[2][0], cov.m[1][1], cov.m[2][1], cov.m[2][2] };
 	outGeom.conicOpacity[idx] = { conic.x, conic.y, conic.z, gaussians.opacities[idx] };
-	outGeom.rgb         [idx] = { color.x, color.y, color.z };
+	outGeom.color       [idx] = { color.x, color.y, color.z };
 }
 
 __global__ static void __launch_bounds__(MGS_DR_KEY_WRITE_WORKGROUP_SIZE)
@@ -417,7 +417,7 @@ _mgs_dr_forward_splat_kernel(MGSDRsettings settings,
 	//---------------
 	__shared__ QMvec2 collectedPixCenters  [MGS_DR_TILE_LEN];
 	__shared__ QMvec4 collectedConicOpacity[MGS_DR_TILE_LEN];
-	__shared__ QMvec3 collectedRGB         [MGS_DR_TILE_LEN];
+	__shared__ QMvec3 collectedColor       [MGS_DR_TILE_LEN];
 
 	//loop over batches until all threads are done:
 	//---------------
@@ -443,7 +443,7 @@ _mgs_dr_forward_splat_kernel(MGSDRsettings settings,
 			uint32_t gaussianIdx = indices[range.x + loadIdx];
 			collectedPixCenters  [block.thread_rank()] = geom.pixCenters[gaussianIdx];
 			collectedConicOpacity[block.thread_rank()] = geom.conicOpacity[gaussianIdx];
-			collectedRGB         [block.thread_rank()] = geom.rgb[gaussianIdx];
+			collectedColor       [block.thread_rank()] = geom.color[gaussianIdx];
 		}
 
 		block.sync();
@@ -474,7 +474,7 @@ _mgs_dr_forward_splat_kernel(MGSDRsettings settings,
 				continue;
 			}
 
-			accumColor = qm_vec3_add(accumColor, qm_vec3_scale(collectedRGB[j], alpha * accumAlpha));
+			accumColor = qm_vec3_add(accumColor, qm_vec3_scale(collectedColor[j], alpha * accumAlpha));
 			accumAlpha = newAccumAlpha;
 
 			lastContributor = numContributors;

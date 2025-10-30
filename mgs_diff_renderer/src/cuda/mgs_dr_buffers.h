@@ -71,7 +71,7 @@ public:
 	uint32_t*   __restrict__ tilesTouchedScan;
 	MGSDRcov3D* __restrict__ covs;
 	QMvec4*     __restrict__ conicOpacity;
-	QMvec3*     __restrict__ rgb;
+	QMvec3*     __restrict__ color;
 
 	size_t tilesTouchedScanTempSize;
 	uint8_t* __restrict__ tilesTouchedScanTemp;

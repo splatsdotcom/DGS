@@ -25,7 +25,7 @@ MGSDRgeomBuffers::MGSDRgeomBuffers(uint8_t* mem, uint32_t count) :
 	tilesTouched     = bump<uint32_t>();
 	covs             = bump<MGSDRcov3D>();
 	conicOpacity     = bump<QMvec4>();
-	rgb              = bump<QMvec3>();
+	color            = bump<QMvec3>();
 	tilesTouchedScan = bump<uint32_t>();
 
 	cub::DeviceScan::InclusiveSum(nullptr, tilesTouchedScanTempSize, tilesTouched, tilesTouchedScan, count);
