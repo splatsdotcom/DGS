@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from . import _C
 
 # ------------------------------------------- #
@@ -59,9 +60,26 @@ class RenderFunction(torch.autograd.Function):
 # ------------------------------------------- #
 
 def render(settings: Settings,
-		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, harmomics: torch.Tensor) -> torch.Tensor:
+		   means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, harmonics: torch.Tensor,
+		   normalizeRotations=True) -> torch.Tensor:
+
+	if normalizeRotations:
+		rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True).clamp(min=1e-8)
 
 	return RenderFunction.apply(
 		settings,
-		means, scales, rotations, opacities, harmomics
+		means, scales, rotations, opacities, harmonics
 	)
+
+class Renderer(nn.Module):
+	def __init__(self, settings, normalizeRotations=True):
+		super().__init__()
+		self.settings = settings
+		self.normalizeRotations = normalizeRotations
+
+	def forward(self, means: torch.Tensor, scales: torch.Tensor, rotations: torch.Tensor, opacities: torch.Tensor, harmonics: torch.Tensor):
+		return render(
+			self.settings, 
+			means, scales, rotations, opacities, harmonics, 
+			self.normalizeRotations
+		)
