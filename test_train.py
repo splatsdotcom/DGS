@@ -3,8 +3,10 @@ import numpy as np
 import math
 from PIL import Image
 import os
-import mgs_diff_renderer as mgsdr
 import time
+
+import mgs # currently nothing, but will eventually have our encoder + utils
+import mgs.diff_renderer as diff_renderer
 
 # ------------------------------------------- #
 
@@ -101,13 +103,13 @@ def main():
 		up = torch.tensor([0.0, 1.0, 0.0], device='cuda')
 		view = look_at(eye, target, up)
 
-		settings = mgsdr.Settings(
+		settings = diff_renderer.Settings(
 			width=width, height=height,
 			view=view, proj=proj,
 			focalX=focalX, focalY=focalY,
 			debug=False
 		)
-		renderer = mgsdr.Renderer(settings)
+		renderer = diff_renderer.Renderer(settings)
 
 		with torch.no_grad():
 			img = renderer(gtMeans, gtScales, gtRotations, gtOpacities, gtHarmonics)

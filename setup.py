@@ -12,7 +12,9 @@ from torch.utils.cpp_extension import (
 
 # ------------------------------------------- #
 
-LIBRARY_NAME = "mgs_diff_renderer"
+LIBRARY_NAME = "mgs"
+DIFF_RENDERER_NAME = "diff_renderer"
+
 if torch.__version__ >= "2.6.0":
     limitedAPI = True
 else:
@@ -43,7 +45,7 @@ def get_extensions():
         compileArgs["nvcc"].append("-g")
         linkArgs.extend(["-O0", "-g"])
 
-    extDir = os.path.join(os.path.dirname(os.path.curdir), LIBRARY_NAME, "src")
+    extDir = os.path.join(os.path.dirname(os.path.curdir), LIBRARY_NAME, DIFF_RENDERER_NAME, "src")
     sources = list(glob.glob(os.path.join(extDir, "*.cpp")))
 
     extDirCuda = os.path.join(extDir, "cuda")
@@ -53,7 +55,7 @@ def get_extensions():
 
     extModules = [
         extension(
-            f"{LIBRARY_NAME}._C",
+            f"{LIBRARY_NAME}.{DIFF_RENDERER_NAME}._C",
             sources,
             extra_compile_args=compileArgs,
             extra_link_args=linkArgs,
