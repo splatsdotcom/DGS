@@ -3,7 +3,6 @@
 #include <math.h>
 #include "mgs_gaussians.h"
 #include "mgs_log.h"
-#include "QuickMath/quickmath.h"
 
 //-------------------------------------------//
 
@@ -42,7 +41,7 @@ MGSerror mgs_gaussians_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dy
 
 	//allocate:
 	//---------------
-	out->means = (float*)MGS_MALLOC(count * 4 * sizeof(float));
+	out->means = (QMvec4*)MGS_MALLOC(count * sizeof(QMvec4));
 	MGS_MALLOC_CHECK(out->means);
 
 	out->covariances = (float*)MGS_MALLOC(count * 6 * sizeof(float));
@@ -64,7 +63,7 @@ MGSerror mgs_gaussians_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dy
 
 	if(dynamic)
 	{
-		out->velocities = (float*)MGS_MALLOC(count * 4 * sizeof(float));
+		out->velocities = (QMvec4*)MGS_MALLOC(count * sizeof(QMvec4));
 		MGS_MALLOC_CHECK(out->velocities);
 	}
 
@@ -127,13 +126,13 @@ MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t d
 
 	//allocate:
 	//---------------
-	out->means = (float*)MGS_MALLOC(count * 3 * sizeof(float));
+	out->means = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
 	MGS_MALLOC_CHECK(out->means);
 
-	out->scales = (float*)MGS_MALLOC(count * 3 * sizeof(float));
+	out->scales = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
 	MGS_MALLOC_CHECK(out->scales);
 
-	out->rotations = (float*)MGS_MALLOC(count * 4 * sizeof(float));
+	out->rotations = (QMquaternion*)MGS_MALLOC(count * sizeof(QMquaternion));
 	MGS_MALLOC_CHECK(out->rotations);
 
 	out->opacities = (float*)MGS_MALLOC(count * sizeof(float));
@@ -145,7 +144,7 @@ MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t d
 
 	if(dynamic)
 	{
-		out->velocities = (float*)MGS_MALLOC(count * 4 * sizeof(float));
+		out->velocities = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
 		MGS_MALLOC_CHECK(out->velocities);
 
 		out->tMeans = (float*)MGS_MALLOC(count * sizeof(float));
@@ -258,34 +257,21 @@ MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
 
 	for(uint32_t i = 0; i < src->count; i++)
 	{
-		uint32_t idxMeanDst = i * 4;
-		uint32_t idxMeanSrc = i * 3;
-
-		uint32_t idxVelDst = i * 4;
-		uint32_t idxVelSrc = i * 3;
-		
-		uint32_t idxScaleSrc = i * 3;
-		
-		uint32_t idxRotSrc = i * 4;
-
-		uint32_t idxCovDst = i * 6;
-		
-		uint32_t idxColorDst = i * 3;
-
 		uint32_t idxShSrc = i * (numShCoeffs * 3);
 		uint32_t idxShDst = i * (numShCoeffs * 3 - 3);
 
 		//mean
-		for(uint32_t j = 0; j < 3; j++)
-			dst->means[idxMeanDst + j] = src->means[idxMeanSrc + j];
-
-		if(src->dynamic)
-			dst->means[idxMeanDst + 3] = src->tMeans[i];
+		dst->means[i] = (QMvec4){
+			src->means[i].x,
+			src->means[i].y,
+			src->means[i].z,
+			src->dynamic ? src->tMeans[i] : 0.5f
+		};
 
 		//covariance
 		QMmat4 M = qm_mat4_mult(
-			qm_mat4_scale(qm_vec3_load(&src->scales[idxScaleSrc])), 
-			qm_quaternion_to_mat4(qm_quaternion_load(&src->rotations[idxRotSrc]))
+			qm_mat4_scale(src->scales[i]), 
+			qm_quaternion_to_mat4(src->rotations[i])
 		);
 		float covariance[6] = {
 			M.m[0][0] * M.m[0][0] + M.m[0][1] * M.m[0][1] + M.m[0][2] * M.m[0][2],
@@ -297,14 +283,14 @@ MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
 		};
 
 		for(uint32_t j = 0; j < 6; j++)
-			dst->covariances[idxCovDst + j] = 4.0f * covariance[j];
+			dst->covariances[i * 6 + j] = 4.0f * covariance[j];
 
 		//opacity
 		dst->opacities[i] = (uint8_t)(src->opacities[i] * UINT8_MAX);
 
 		//color
 		for(uint32_t j = 0; j < 3; j++)
-			dst->colors[idxColorDst + j] = (uint16_t)((src->shs[idxShSrc + j] - dst->colorMin) * colorScale * UINT16_MAX);
+			dst->colors[i * 3 + j] = (uint16_t)((src->shs[idxShSrc + j] - dst->colorMin) * colorScale * UINT16_MAX);
 
 		//sh
 		for(uint32_t j = 0; j < numShCoeffs * 3 - 3; j++)
@@ -313,10 +299,12 @@ MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
 		//velocity
 		if(src->dynamic)
 		{
-			for(uint32_t j = 0; j < 3; j++)
-				dst->velocities[idxVelDst + j] = src->velocities[idxVelSrc + j];
-
-			dst->velocities[idxVelDst + 3] = src->tStdevs[i];
+			dst->velocities[i] = (QMvec4){
+				src->velocities[i].x,
+				src->velocities[i].y,
+				src->velocities[i].z,
+				src->tStdevs[i]
+			};
 		}
 	}
 

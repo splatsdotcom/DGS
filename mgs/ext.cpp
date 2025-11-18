@@ -82,14 +82,15 @@ PYBIND11_MODULE(_C, m)
 			gaussians.count = (uint32_t)count;
 			gaussians.shDegree = shDegree;
 			gaussians.dynamic = (mgs_bool_t)dynamic;
-			gaussians.means      =           const_cast<float*>(means.data());
-			gaussians.scales     =           const_cast<float*>(scales.data());
-			gaussians.rotations  =           const_cast<float*>(rotations.data());
-			gaussians.opacities  =           const_cast<float*>(opacities.data());
-			gaussians.shs        =           const_cast<float*>(shs.data());
-			gaussians.velocities = dynamic ? const_cast<float*>(velocities.data()) : nullptr;
-			gaussians.tMeans     = dynamic ? const_cast<float*>(tMeans.data())     : nullptr;
-			gaussians.tStdevs    = dynamic ? const_cast<float*>(tStdevs.data())    : nullptr;
+			gaussians.means      = reinterpret_cast<QMvec3*>      (const_cast<float*>(means.data()));
+			gaussians.scales     = reinterpret_cast<QMvec3*>      (const_cast<float*>(scales.data()));
+			gaussians.rotations  = reinterpret_cast<QMquaternion*>(const_cast<float*>(rotations.data()));
+			gaussians.opacities  =                                 const_cast<float*>(opacities.data());
+			gaussians.shs        =                                 const_cast<float*>(shs.data());
+			
+			gaussians.velocities = dynamic ? reinterpret_cast<QMvec3*>(const_cast<float*>(velocities.data())) : nullptr;
+			gaussians.tMeans     = dynamic ?                           const_cast<float*>(tMeans.data())      : nullptr;
+			gaussians.tStdevs    = dynamic ?                           const_cast<float*>(tStdevs.data())     : nullptr;
 
 			//return:
 			//---------------

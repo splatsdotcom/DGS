@@ -5,6 +5,7 @@
 
 #include "mgs_global.h"
 #include "mgs_error.h"
+#include "QuickMath/quickmath.h"
 
 #ifndef MGS_GAUSSIANS_H
 #define MGS_GAUSSIANS_H
@@ -30,13 +31,13 @@ typedef struct MGSgaussians
 	float shMin;
 	float shMax;
 
-	float* means;       // (mean x, mean y, mean z, mean t) fp32
+	QMvec4* means;      // (mean x, mean y, mean z, mean t) fp32
 	float* covariances; // (m00, m01, m02, m11, m12, m22) fp32
 	uint8_t* opacities; // (a) unorm8 in [0.0, 1.0]
 	uint16_t* colors;   // (r, g, b) unorm16 in [colorMin, colorMax]
 	uint8_t* shs;       // (shDegree + 1)^2 - 1 (r, g, b) unorm8 in [shMin, shMax], NULL if shDegree == 0
-	
-	float* velocities;  // (vel x, vel y, vel z, t-stdev) fp32, NULL if dynamic == MGS_FALSE
+
+	QMvec4* velocities; // (vel x, vel y, vel z, t-stdev) fp32, NULL if dynamic == MGS_FALSE
 } MGSgaussians;
 
 /**
@@ -48,15 +49,15 @@ typedef struct MGSgaussiansF
 	uint32_t shDegree;
 	mgs_bool_t dynamic;
 
-	float* means;      // (mean x, mean y, mean z)
-	float* scales;     // (scale x, scale y, scale z)
-	float* rotations;  // (quat x, quat y, quat z, quat w)
+	QMvec3* means;
+	QMvec3* scales;
+	QMquaternion* rotations;
 	float* opacities;
-	float* shs;        // (shDegree + 1)^2 (r, g, b)
+	float* shs;         // (shDegree + 1)^2 (r, g, b)
 
-	float* velocities; // (vel x, vel y, vel z, t-stdev), NULL if dynamic == MGS_FALSE
-	float* tMeans;     // NULL if dynamic == MGS_FALSE
-	float* tStdevs;    // NULL if dynamic == MGS_FALSE
+	QMvec3* velocities; // (vel x, vel y, vel z, t-stdev), NULL if dynamic == MGS_FALSE
+	float* tMeans;      // NULL if dynamic == MGS_FALSE
+	float* tStdevs;     // NULL if dynamic == MGS_FALSE
 } MGSgaussiansF;
 
 //-------------------------------------------//
