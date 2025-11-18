@@ -82,15 +82,15 @@ PYBIND11_MODULE(_C, m)
 			gaussians.count = (uint32_t)count;
 			gaussians.shDegree = shDegree;
 			gaussians.dynamic = (mgs_bool_t)dynamic;
-			gaussians.means      = reinterpret_cast<QMvec3*>      (const_cast<float*>(means.data()));
-			gaussians.scales     = reinterpret_cast<QMvec3*>      (const_cast<float*>(scales.data()));
-			gaussians.rotations  = reinterpret_cast<QMquaternion*>(const_cast<float*>(rotations.data()));
-			gaussians.opacities  =                                 const_cast<float*>(opacities.data());
-			gaussians.shs        =                                 const_cast<float*>(shs.data());
-			
-			gaussians.velocities = dynamic ? reinterpret_cast<QMvec3*>(const_cast<float*>(velocities.data())) : nullptr;
-			gaussians.tMeans     = dynamic ?                           const_cast<float*>(tMeans.data())      : nullptr;
-			gaussians.tStdevs    = dynamic ?                           const_cast<float*>(tStdevs.data())     : nullptr;
+			gaussians.means      = (QMvec3*)means.data();
+			gaussians.scales     = (QMvec3*)scales.data();
+			gaussians.rotations  = (QMquaternion*)rotations.data();
+			gaussians.opacities  = (float*)opacities.data();
+			gaussians.shs        = (float*)shs.data();
+
+			gaussians.velocities = dynamic ? (QMvec3*)velocities.data() : nullptr;
+			gaussians.tMeans     = dynamic ? (float*)tMeans.data()      : nullptr;
+			gaussians.tStdevs    = dynamic ? (float*)tStdevs.data()     : nullptr;
 
 			//return:
 			//---------------
