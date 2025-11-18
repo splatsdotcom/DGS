@@ -4,6 +4,12 @@ build/
 __pycache__/
 *.egg-info/
 
+# config
+.vscode/
+
+# macos
+**/.DS_Store
+
 # testing input/output data
 *.png
 *.ply

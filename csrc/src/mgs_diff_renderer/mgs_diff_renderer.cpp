@@ -12,10 +12,10 @@
 
 MGSDRresizeFunc _mgs_dr_tensor_resize_function(at::Tensor& tensor)
 {
-    return [&tensor](uint64_t size) {
-        tensor.resize_({(long long)size});
+	return [&tensor](uint64_t size) {
+		tensor.resize_({(long long)size});
 		return reinterpret_cast<uint8_t*>(tensor.contiguous().data_ptr());
-    };
+	};
 }
 
 uint32_t _mgs_dr_validate_gaussians(const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics)
@@ -47,7 +47,7 @@ class MGSDRsettingsTorch : public torch::CustomClassHolder
 {
 public:
 	MGSDRsettingsTorch(int64_t width, int64_t height, const at::Tensor& view, const at::Tensor& proj,
-	                   double focalX, double focalY, bool debug)
+					   double focalX, double focalY, bool debug)
 	{
 		//validate:
 		//---------------
@@ -137,7 +137,7 @@ mgs_dr_forward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings,
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mgs_dr_backward(const c10::intrusive_ptr<MGSDRsettingsTorch>& settings, const at::Tensor& dLdImage,
                 const at::Tensor& means, const at::Tensor& scales, const at::Tensor& rotations, const at::Tensor& opacities, const at::Tensor& harmonics,
-			    int64_t numRendered, const at::Tensor& geomBufs, const at::Tensor& binningBufs, const at::Tensor& imageBufs)
+                int64_t numRendered, const at::Tensor& geomBufs, const at::Tensor& binningBufs, const at::Tensor& imageBufs)
 {
 	MGSDRsettings cSettings = settings->settings;
 
