@@ -1,8 +1,32 @@
 [build-system]
 requires = [
     "setuptools",
-    "torch",
     "pybind11>=2.6"
 ]
-
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "mgs"
+version = "0.0.1"
+description = "Moving Gaussian Splats"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+	{name = "Daniel Elwell", email = "de@true3d.com"}
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/True3DLabs/MGS"
+Repository = "https://github.com/True3DLabs/MGS"
+Issues = "https://github.com/True3DLabs/MGS/issues"
