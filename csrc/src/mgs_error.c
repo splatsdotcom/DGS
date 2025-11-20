@@ -27,5 +27,7 @@ const char* mgs_error_get_description(MGSerror error)
 		return "failed to read from a file (fread read fewer bytes than requested)";
 	case MGS_ERROR_FILE_WRITE:
 		return "failed to write to a file (fwrite wrote fewer bytes than requested)";
+	default:
+		return "unknown error";
 	}
 }
