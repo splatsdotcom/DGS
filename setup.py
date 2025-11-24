@@ -21,7 +21,7 @@ def get_extension():
     ]
 
 	srcs = list(
-		glob.glob(os.path.join(CSRC_DIR, "src", "*.cpp")) 
+		glob.glob(os.path.join(CSRC_DIR, "src", "*.c")) 
 	)
 	srcs.append(
 		os.path.join(CSRC_DIR, "ext.cpp")

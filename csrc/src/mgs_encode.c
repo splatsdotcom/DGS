@@ -6,7 +6,7 @@
 
 //-------------------------------------------//
 
-MGSerror _mgs_fwrite(FILE* file, const void* data, size_t size);
+static MGSerror _mgs_fwrite(FILE* file, const void* data, size_t size);
 
 //-------------------------------------------//
 
@@ -75,7 +75,7 @@ cleanup:
 	return retval;
 }
 
-MGSerror _mgs_fwrite(FILE* file, const void* data, size_t size)
+static MGSerror _mgs_fwrite(FILE* file, const void* data, size_t size)
 {
 	if(fwrite(data, size, 1, file) < 1)
 	{

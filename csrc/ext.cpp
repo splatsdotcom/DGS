@@ -7,10 +7,13 @@
 
 #include "mgs_gaussians.h"
 #include "mgs_encode.h"
+#include "mgs_decode.h"
 
 namespace py = pybind11;
 
 //-------------------------------------------//
+
+//TODO: MGSgaussians and MGSgaussiansF leak memory, no destructor!!
 
 PYBIND11_MODULE(_C, m)
 {
@@ -122,5 +125,16 @@ PYBIND11_MODULE(_C, m)
 		MGSerror error = mgs_encode(&gaussians, path.c_str());
 		if(error != MGS_SUCCESS)
 			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+	});
+
+	m.def("decode", [](const std::string& path)
+	{
+		std::shared_ptr<MGSgaussians> out = std::make_shared<MGSgaussians>();
+
+		MGSerror error = mgs_decode_from_file(path.c_str(), out.get());
+		if(error != MGS_SUCCESS)
+			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+
+		return out;
 	});
 }
