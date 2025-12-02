@@ -13,6 +13,10 @@ namespace py = pybind11;
 
 //-------------------------------------------//
 
+std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj);
+
+//-------------------------------------------//
+
 //TODO: MGSgaussians and MGSgaussiansF leak memory, no destructor!!
 
 PYBIND11_MODULE(_C, m)
@@ -137,4 +141,71 @@ PYBIND11_MODULE(_C, m)
 
 		return out;
 	});
+
+	m.def("combine", [](py::object g1Obj, py::object g2Obj, py::object outPathObj)
+	{
+		//load:
+		//---------------
+		std::shared_ptr<MGSgaussians> g1 = read_or_decode(g1Obj);
+		std::shared_ptr<MGSgaussians> g2 = read_or_decode(g2Obj);
+
+		//combine:
+		//---------------
+		std::shared_ptr<MGSgaussians> out = std::make_shared<MGSgaussians>();
+
+		MGSerror error = mgs_gaussians_combine(g1.get(), g2.get(), out.get());
+		if(error != MGS_SUCCESS)
+			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+
+		//write out if path provided:
+		//---------------
+		if(!outPathObj.is_none())
+		{
+			std::string outPath = outPathObj.cast<std::string>();
+
+			error = mgs_encode(out.get(), outPath.c_str());
+			if(error != MGS_SUCCESS)
+				throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+		}
+
+		//return:
+		//---------------
+		return py::cast(out);
+	},
+	"Combine two Gaussian sets.\n"
+	"Arguments may be either Gaussians objects or file paths.\n"
+	"If out_path is supplied, the result is written to disk.",
+	py::arg("g1"),
+	py::arg("g2"),
+	py::arg("out_path") = py::none());
+}
+
+//-------------------------------------------//
+
+std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj)
+{
+	std::shared_ptr<MGSgaussians> out;
+
+	if(py::isinstance<py::str>(obj))
+	{
+		std::string path = obj.cast<std::string>();
+		out = std::make_shared<MGSgaussians>();
+
+		MGSerror error = mgs_decode_from_file(path.c_str(), out.get());
+		if(error != MGS_SUCCESS)
+			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+	}
+	else
+	{
+		try 
+		{
+			out = obj.cast<std::shared_ptr<MGSgaussians>>();
+		}
+		catch(...) 
+		{
+			throw std::invalid_argument("Argument must be either str or Gaussians");
+		}
+	}
+
+	return out;
 }

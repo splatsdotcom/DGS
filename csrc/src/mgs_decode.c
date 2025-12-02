@@ -137,6 +137,13 @@ static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out)
 		retval = MGS_ERROR_INVALID_INPUT;
 		goto cleanup;
 	}
+
+	if(shDegree > 0 && shMin > shMax)
+	{
+		MGS_LOG_ERROR("invalid sh normalization coefficients");
+		retval = MGS_ERROR_INVALID_INPUT;
+		goto cleanup;
+	}
 	
 	//allocate gaussians:
 	//---------------

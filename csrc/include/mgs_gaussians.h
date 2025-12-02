@@ -73,6 +73,12 @@ MGS_API MGSerror mgs_gaussians_allocate(uint32_t count, uint32_t shDegree, mgs_b
 MGS_API void mgs_gaussians_free(MGSgaussians* gaussians);
 
 /**
+ * combines 2 sets of gaussians, if at least 1 of them is dynamic, the combined gaussians will also be dynamic
+ */
+MGS_API MGSerror mgs_gaussians_combine(const MGSgaussians* g1, const MGSgaussians* g2, MGSgaussians* out);
+
+
+/**
  * allocates memory for MGSgaussiansF, call mgs_gaussians_free to free
  */
 MGS_API MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dynamic, MGSgaussiansF* out);

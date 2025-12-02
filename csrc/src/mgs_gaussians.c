@@ -96,6 +96,134 @@ void mgs_gaussians_free(MGSgaussians* g)
 	MGS_STRUCTURE_CLEAR(g);
 }
 
+MGSerror mgs_gaussians_combine(const MGSgaussians* g1, const MGSgaussians* g2, MGSgaussians* out)
+{
+	MGSerror retval = MGS_SUCCESS;
+
+	MGS_STRUCTURE_CLEAR(out);
+
+	//validate:
+	//---------------
+	if(g1->shDegree != g2->shDegree) //TODO: make this work
+	{
+		MGS_LOG_ERROR("cannot combine gaussians with different shDegree");
+		return MGS_ERROR_INVALID_INPUT;
+	}
+
+	//compute metadata:
+	//---------------
+	uint32_t count = g1->count + g2->count;
+	uint32_t shDegree = g1->shDegree;
+	mgs_bool_t dynamic = (g1->dynamic || g2->dynamic);
+
+	float colorMinOut = MGS_MIN(g1->colorMin, g2->colorMin);
+	float colorMaxOut = MGS_MAX(g1->colorMax, g2->colorMax);
+	float shMinOut    = MGS_MIN(g1->shMin, g2->shMin);
+	float shMaxOut    = MGS_MAX(g1->shMax, g2->shMax);
+
+	//allocate output:
+	//---------------
+	MGS_ERROR_PROPAGATE(
+		mgs_gaussians_allocate(count, shDegree, dynamic, out)
+	);
+
+	out->colorMin = colorMinOut;
+	out->colorMax = colorMaxOut;
+	out->shMin    = shMinOut;
+	out->shMax    = shMaxOut;
+
+	//copy non-quantized data:
+	//---------------
+	memcpy(out->means            , g1->means, sizeof(QMvec4) * g1->count);
+	memcpy(out->means + g1->count, g2->means, sizeof(QMvec4) * g2->count);
+
+	memcpy(out->covariances                , g1->covariances, sizeof(float) * 6 * g1->count);
+	memcpy(out->covariances + 6 * g1->count, g2->covariances, sizeof(float) * 6 * g2->count);
+
+	memcpy(out->opacities            , g1->opacities, sizeof(uint8_t) * g1->count);
+	memcpy(out->opacities + g1->count, g2->opacities, sizeof(uint8_t) * g2->count);
+
+	//re-normalize and copy colors:
+	//---------------
+	float colorScaleOut = (colorMaxOut - colorMinOut);
+
+	for(uint32_t i = 0; i < count; i++)
+	for(uint32_t j = 0; j < 3; j++)
+	{
+		uint16_t v;
+		float offset, scale;
+
+		if(i < g1->count)
+		{
+			v = g1->colors[i * 3 + j];
+			offset = g1->colorMin;
+			scale = g1->colorMax - g1->colorMin;
+		}
+		else
+		{
+			v = g2->colors[(i - g1->count) * 3 + j];
+			offset = g2->colorMin;
+			scale = g2->colorMax - g2->colorMin;
+		}
+
+		float vf = ((float)v / UINT16_MAX) * scale + offset;
+		float vn = (vf - colorMinOut) / colorScaleOut;
+		out->colors[i * 3 + j] = (uint16_t)(vn * UINT16_MAX);
+	}
+
+	//re-normalize and copy shs:
+	//---------------
+	float shRangeOut = (shMaxOut - shMinOut);
+	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
+
+	for(uint32_t i = 0; i < count; i++)
+	for(uint32_t j = 0; j < numShCoeff * 3; j++)
+	{
+		uint8_t v;
+		float offset, scale;
+
+		if(i < g1->count)
+		{
+			v = g1->shs[i * numShCoeff * 3 + j];
+			offset = g1->shMin;
+			scale = g1->shMax - g1->shMin;
+		}
+		else
+		{
+			v = g2->shs[(i - g1->count) * numShCoeff * 3 + j];
+			offset = g2->shMin;
+			scale = g2->shMax - g2->shMin;
+		}
+
+		float vf = ((float)v / UINT8_MAX) * scale + offset;
+		float vn = (vf - shMinOut) / shRangeOut;
+		out->shs[i * numShCoeff * 3 + j] = (uint8_t)(vn * UINT8_MAX);
+	}
+
+	//copy velocities:
+	//---------------
+	if(dynamic)
+	{
+		if(g1->dynamic)
+			memcpy(out->velocities, g1->velocities, g1->count * sizeof(QMvec4));
+		else
+			memset(out->velocities, 0, g1->count * sizeof(QMvec4));
+
+		if(g2->dynamic)
+			memcpy(out->velocities + g1->count, g2->velocities, g2->count * sizeof(QMvec4));
+		else
+			memset(out->velocities + g1->count, 0, g2->count * sizeof(QMvec4));
+	}
+
+	//cleanup + return:
+	//---------------
+cleanup:
+	if(retval != MGS_SUCCESS)
+		mgs_gaussians_free(out);
+	
+	return retval;
+}
+
 MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dynamic, MGSgaussiansF* out)
 {
 	MGSerror retval = MGS_SUCCESS;
