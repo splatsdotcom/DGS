@@ -25,13 +25,13 @@ typedef struct MGSreader
 
 //-------------------------------------------//
 
-static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out);
+static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out, MGSmetadata* outMetadata);
 
 static MGSerror _mgs_read(MGSreader* reader, void* data, uint64_t size);
 
 //-------------------------------------------//
 
-MGSerror mgs_decode_from_file(const char* path, MGSgaussians* out)
+MGSerror mgs_decode_from_file(const char* path, MGSgaussians* out, MGSmetadata* outMetadata)
 {
 	MGSerror retval = MGS_SUCCESS;
 
@@ -54,7 +54,7 @@ MGSerror mgs_decode_from_file(const char* path, MGSgaussians* out)
 	reader.isFile = MGS_TRUE;
 	reader.file = in;
 
-	MGS_ERROR_PROPAGATE(_mgs_decode(&reader, out));
+	MGS_ERROR_PROPAGATE(_mgs_decode(&reader, out, outMetadata));
 
 	//cleanup + return:
 	//---------------
@@ -67,7 +67,7 @@ cleanup:
 	return retval;
 }
 
-MGSerror mgs_decode_from_buffer(uint64_t size, const uint8_t* buf, MGSgaussians* out)
+MGSerror mgs_decode_from_buffer(uint64_t size, const uint8_t* buf, MGSgaussians* out, MGSmetadata* outMetadata)
 {
 	MGSerror retval = MGS_SUCCESS;
 
@@ -81,7 +81,7 @@ MGSerror mgs_decode_from_buffer(uint64_t size, const uint8_t* buf, MGSgaussians*
 	reader.buf.pos = 0;
 	reader.buf.buf = buf;
 
-	MGS_ERROR_PROPAGATE(_mgs_decode(&reader, out));
+	MGS_ERROR_PROPAGATE(_mgs_decode(&reader, out, outMetadata));
 
 	//cleanup + return:
 	//---------------
@@ -92,11 +92,37 @@ cleanup:
 	return retval;
 }
 
-static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out)
+static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out, MGSmetadata* outMetadata)
 {
 	MGSerror retval = MGS_SUCCESS;
 
-	//read metadata:
+	//file header + metadata:
+	//---------------
+	MGSfileHeader header;
+
+	MGS_ERROR_PROPAGATE(_mgs_read(reader, &header, sizeof(MGSfileHeader)));
+	MGS_ERROR_PROPAGATE(_mgs_read(reader, outMetadata, sizeof(MGSmetadata)));
+
+	//validate file header + metadata:
+	//---------------
+	if(header.magicWord != MGS_MAGIC_WORD)
+	{
+		MGS_LOG_ERROR("mismatched magic word");
+		retval = MGS_ERROR_INVALID_INPUT;
+		goto cleanup;
+	}
+
+	if(header.version != MGS_VERSION) //TODO: keep versions compatible!
+	{
+		MGS_LOG_ERROR("mismatched version");
+		retval = MGS_ERROR_INVALID_INPUT;
+		goto cleanup;
+	}
+
+	if(outMetadata->duration < 0.0f)
+		MGS_LOG_WARNING("negative duration encountered in metadata");
+
+	//read gaussian properties:
 	//---------------
 	uint32_t count;
 	mgs_bool_t dynamic;
@@ -115,7 +141,7 @@ static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out)
 	MGS_ERROR_PROPAGATE(_mgs_read(reader, &shMin   , sizeof(float)));
 	MGS_ERROR_PROPAGATE(_mgs_read(reader, &shMax   , sizeof(float)));
 
-	//validate metadata:
+	//validate gaussian properties:
 	//---------------
 	if(count == 0)
 	{
@@ -156,7 +182,7 @@ static MGSerror _mgs_decode(MGSreader* reader, MGSgaussians* out)
 	out->shMin = shMin;
 	out->shMax = shMax;
 
-	//read data:
+	//read gaussian data:
 	//---------------
 	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
 

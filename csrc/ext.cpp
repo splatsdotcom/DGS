@@ -13,7 +13,7 @@ namespace py = pybind11;
 
 //-------------------------------------------//
 
-std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj);
+std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj, MGSmetadata& metadata);
 
 //-------------------------------------------//
 
@@ -22,6 +22,15 @@ std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj);
 PYBIND11_MODULE(_C, m)
 {
 	m.doc() = "MGS Core";
+
+	constexpr uint32_t MGS_VERSION_MAJOR = (MGS_VERSION >> 22) & 0x3FF;
+	constexpr uint32_t MGS_VERSION_MINOR = (MGS_VERSION >> 12) & 0x3FF;
+	constexpr uint32_t MGS_VERSION_PATCH = MGS_VERSION & 0x3FF;
+
+	m.attr("__version__") =
+		std::to_string(MGS_VERSION_MAJOR) + "." +
+		std::to_string(MGS_VERSION_MINOR) + "." +
+		std::to_string(MGS_VERSION_PATCH);
 
 	py::class_<MGSgaussians, std::shared_ptr<MGSgaussians>>(m, "Gaussians")
 		.def(py::init([](const py::array_t<float, py::array::c_style | py::array::forcecast>& means,
@@ -109,45 +118,75 @@ PYBIND11_MODULE(_C, m)
 
 			return out;
 		}),
-		"Load Gaussians from NumPy/PyTorch arrays",
+		"Load Gaussians from NumPy/PyTorch arrays.",
 		py::arg("means"),
 		py::arg("scales"),
 		py::arg("rotations"),
 		py::arg("opacities"),
 		py::arg("shs"),
 		py::arg("velocities") = py::none(),
-		py::arg("tMeans")     = py::none(),
-		py::arg("tStdevs")    = py::none())
+		py::arg("t_means")     = py::none(),
+		py::arg("t_stdevs")    = py::none())
 
 		.def("__len__", [](const MGSgaussians& self)
 		{
 			return self.count;
 		});
 
-	m.def("encode", [](const MGSgaussians& gaussians, const std::string& path)
+	py::class_<MGSmetadata>(m, "Metadata")
+		.def(py::init([](float duration)
+		{
+			//validate:
+			//---------------
+			if(duration < 0.0f)
+				throw std::invalid_argument("duration must be positive");
+
+			//create struct:
+			//---------------
+			MGSmetadata metadata;
+			metadata.duration = duration;
+
+			return metadata;
+		}),
+		"Initialize .mgs metadata",
+		py::arg("duration") = 0.0f)
+
+		.def_readwrite("duration", &MGSmetadata::duration);
+
+	m.def("encode", [](const MGSgaussians& gaussians, const MGSmetadata& metadata, const std::string& path)
 	{
-		MGSerror error = mgs_encode(&gaussians, path.c_str());
+		MGSerror error = mgs_encode(&gaussians, metadata, path.c_str());
 		if(error != MGS_SUCCESS)
 			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
-	});
+	},
+	"Encode a set of Gaussians into a .mgs file.",
+	py::arg("gaussians"),
+	py::arg("metadata"),
+	py::arg("out_path"));
 
 	m.def("decode", [](const std::string& path)
 	{
 		std::shared_ptr<MGSgaussians> out = std::make_shared<MGSgaussians>();
+		MGSmetadata outMetadata;
 
-		MGSerror error = mgs_decode_from_file(path.c_str(), out.get());
+		MGSerror error = mgs_decode_from_file(path.c_str(), out.get(), &outMetadata);
 		if(error != MGS_SUCCESS)
 			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 
-		return out;
-	});
+		return std::make_tuple(out, outMetadata);
+	},
+	"Decode a set of Gaussians from a .mgs file.\n",
+	"Returns a tuple (Gaussians, Metadata).",
+	py::arg("path"));
 
 	m.def("combine", [](py::object g1Obj, py::object g2Obj, py::object outPathObj)
 	{
 		//load:
 		//---------------
-		std::shared_ptr<MGSgaussians> g1 = read_or_decode(g1Obj);
-		std::shared_ptr<MGSgaussians> g2 = read_or_decode(g2Obj);
+		MGSmetadata g1Meta, g2Meta;
+
+		std::shared_ptr<MGSgaussians> g1 = read_or_decode(g1Obj, g1Meta);
+		std::shared_ptr<MGSgaussians> g2 = read_or_decode(g2Obj, g2Meta);
 
 		//combine:
 		//---------------
@@ -163,14 +202,14 @@ PYBIND11_MODULE(_C, m)
 		{
 			std::string outPath = outPathObj.cast<std::string>();
 
-			error = mgs_encode(out.get(), outPath.c_str());
+			error = mgs_encode(out.get(), g1Meta, outPath.c_str());
 			if(error != MGS_SUCCESS)
 				throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 		}
 
 		//return:
 		//---------------
-		return py::cast(out);
+		return out;
 	},
 	"Combine two Gaussian sets.\n"
 	"Arguments may be either Gaussians objects or file paths.\n"
@@ -182,7 +221,7 @@ PYBIND11_MODULE(_C, m)
 
 //-------------------------------------------//
 
-std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj)
+std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj, MGSmetadata& metadata)
 {
 	std::shared_ptr<MGSgaussians> out;
 
@@ -191,7 +230,7 @@ std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj)
 		std::string path = obj.cast<std::string>();
 		out = std::make_shared<MGSgaussians>();
 
-		MGSerror error = mgs_decode_from_file(path.c_str(), out.get());
+		MGSerror error = mgs_decode_from_file(path.c_str(), out.get(), &metadata);
 		if(error != MGS_SUCCESS)
 			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 	}
@@ -200,6 +239,7 @@ std::shared_ptr<MGSgaussians> read_or_decode(const py::object obj)
 		try 
 		{
 			out = obj.cast<std::shared_ptr<MGSgaussians>>();
+			metadata = (MGSmetadata){0};
 		}
 		catch(...) 
 		{

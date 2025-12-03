@@ -10,7 +10,7 @@ static MGSerror _mgs_fwrite(FILE* file, const void* data, size_t size);
 
 //-------------------------------------------//
 
-MGSerror mgs_encode(const MGSgaussians* g, const char* outputPath)
+MGSerror mgs_encode(const MGSgaussians* g, MGSmetadata metadata, const char* outputPath)
 {
 	MGSerror retval = MGS_SUCCESS;
 
@@ -26,7 +26,16 @@ MGSerror mgs_encode(const MGSgaussians* g, const char* outputPath)
 		goto cleanup;
 	}
 
-	//write metadata:
+	//write file header + metadata:
+	//---------------
+	MGSfileHeader header;
+	header.magicWord = MGS_MAGIC_WORD;
+	header.version = MGS_VERSION;
+
+	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &header, sizeof(MGSfileHeader)));
+	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &metadata, sizeof(MGSmetadata)));
+
+	//write gaussian metadata:
 	//---------------
 	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &g->count   , sizeof(uint32_t)));
 	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &g->dynamic , sizeof(mgs_bool_t)));
@@ -38,7 +47,7 @@ MGSerror mgs_encode(const MGSgaussians* g, const char* outputPath)
 	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &g->shMin   , sizeof(float)));
 	MGS_ERROR_PROPAGATE(_mgs_fwrite(out, &g->shMax   , sizeof(float)));
 	
-	//write data:
+	//write gaussian data:
 	//---------------
 	uint32_t numShCoeff = (g->shDegree + 1) * (g->shDegree + 1) - 1;
 
