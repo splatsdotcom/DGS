@@ -95,9 +95,9 @@ PYBIND11_MODULE(_C, m)
 			//load into MGSgaussiansF:
 			//---------------
 			MGSgaussiansF gaussians;
-			gaussians.count = (uint32_t)count;
-			gaussians.shDegree = shDegree;
-			gaussians.dynamic = (mgs_bool_t)dynamic;
+			gaussians.count      = (uint32_t)count;
+			gaussians.shDegree   = shDegree;
+			gaussians.dynamic    = (mgs_bool_t)dynamic;
 			gaussians.means      = (QMvec3*)means.data();
 			gaussians.scales     = (QMvec3*)scales.data();
 			gaussians.rotations  = (QMquaternion*)rotations.data();

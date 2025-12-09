@@ -74,6 +74,7 @@ MGSerror mgs_encode(const MGSgaussians* g, MGSmetadata metadata, const char* out
 		retval = MGS_ERROR_FILE_CLOSE;
 		goto cleanup;	
 	}
+	out = NULL;
 
 	//cleanup + return:
 	//---------------
