@@ -48,6 +48,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    permissions:
+          id-token: write
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,6 +66,4 @@ jobs:
           find dist_temp -name "*.whl" -exec mv {} dist/ \;
       
       - name: Upload wheels to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.10.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        uses: pypa/gh-action-pypi-publish@v1
