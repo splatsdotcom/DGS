@@ -12,13 +12,15 @@ CSRC_DIR_ABSOLUTE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "cs
 # ------------------------------------------- #
 
 def get_extension():
-	linkArgs = [
-		"-O3"
-	]
-	compileArgs = [
-        "-O3",
-        "-Wno-missing-braces"
-    ]
+	linkArgs = [  ] if os.name == "nt" else [ "-O3" ]
+	compileArgs = ([ 
+		"/std:c++17", 
+		"/O2" 
+	] if os.name == "nt" else [
+		"-std=c++17",
+		"-O3",
+		"-Wno-missing-braces"
+	])
 
 	srcs = list(
 		glob.glob(os.path.join(CSRC_DIR, "src", "*.c")) 
@@ -30,7 +32,7 @@ def get_extension():
 	includeDirs = [
 		os.path.join(CSRC_DIR_ABSOLUTE, "include"),
 		os.path.join(CSRC_DIR_ABSOLUTE, "external"),
-        pybind11.get_include()
+		pybind11.get_include()
 	]
 
 	return Extension(

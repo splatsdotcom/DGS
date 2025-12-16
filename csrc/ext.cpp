@@ -239,7 +239,7 @@ std::shared_ptr<DGSgaussians> read_or_decode(const py::object obj, DGSmetadata& 
 		try 
 		{
 			out = obj.cast<std::shared_ptr<DGSgaussians>>();
-			metadata = (DGSmetadata){0};
+			metadata = {0};
 		}
 		catch(...) 
 		{
