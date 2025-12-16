@@ -44,6 +44,8 @@ jobs:
           path: wheelhouse/*.whl
   
   publish:
+    if: startsWith(github.ref, 'refs/tags/')
+
     needs: build
 
     runs-on: ubuntu-latest
