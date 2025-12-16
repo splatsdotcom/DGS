@@ -5,7 +5,7 @@ from setuptools import find_packages, setup, Extension
 
 # ------------------------------------------- #
 
-LIBRARY_NAME = "mgs"
+LIBRARY_NAME = "dgs"
 CSRC_DIR = "csrc"
 CSRC_DIR_ABSOLUTE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "csrc")
 

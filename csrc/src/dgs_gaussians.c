@@ -1,30 +1,30 @@
-#define __FILENAME__ "mgs_error.c"
+#define __FILENAME__ "dgs_error.c"
 
 #include <math.h>
-#include "mgs_gaussians.h"
-#include "mgs_log.h"
+#include "dgs_gaussians.h"
+#include "dgs_log.h"
 
 //-------------------------------------------//
 
-MGSerror mgs_gaussians_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dynamic, MGSgaussians* out)
+DGSerror dgs_gaussians_allocate(uint32_t count, uint32_t shDegree, dgs_bool_t dynamic, DGSgaussians* out)
 {
-	MGSerror retval = MGS_SUCCESS;
+	DGSerror retval = DGS_SUCCESS;
 
-	MGS_STRUCTURE_CLEAR(out);
+	DGS_STRUCTURE_CLEAR(out);
 
 	//validate:
 	//---------------
 	if(count == 0)
 	{
-		MGS_LOG_ERROR("gaussian count must be positive");
-		retval = MGS_ERROR_INVALID_ARGUMENTS;
+		DGS_LOG_ERROR("gaussian count must be positive");
+		retval = DGS_ERROR_INVALID_ARGUMENTS;
 		goto cleanup;
 	}
 
-	if(shDegree > MGS_GAUSSIANS_MAX_SH_DEGREE)
+	if(shDegree > DGS_GAUSSIANS_MAX_SH_DEGREE)
 	{
-		MGS_LOG_ERROR("gaussian spherical harmomic degree must be less than MGS_GAUSSIANS_MAX_SH_DEGREE");
-		retval = MGS_ERROR_INVALID_ARGUMENTS;
+		DGS_LOG_ERROR("gaussian spherical harmomic degree must be less than DGS_GAUSSIANS_MAX_SH_DEGREE");
+		retval = DGS_ERROR_INVALID_ARGUMENTS;
 		goto cleanup;
 	}
 
@@ -41,90 +41,90 @@ MGSerror mgs_gaussians_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dy
 
 	//allocate:
 	//---------------
-	out->means = (QMvec4*)MGS_MALLOC(count * sizeof(QMvec4));
-	MGS_MALLOC_CHECK(out->means);
+	out->means = (QMvec4*)DGS_MALLOC(count * sizeof(QMvec4));
+	DGS_MALLOC_CHECK(out->means);
 
-	out->covariances = (float*)MGS_MALLOC(count * 6 * sizeof(float));
-	MGS_MALLOC_CHECK(out->covariances);
+	out->covariances = (float*)DGS_MALLOC(count * 6 * sizeof(float));
+	DGS_MALLOC_CHECK(out->covariances);
 
-	out->opacities = (uint8_t*)MGS_MALLOC(count * sizeof(uint8_t));
-	MGS_MALLOC_CHECK(out->opacities);
+	out->opacities = (uint8_t*)DGS_MALLOC(count * sizeof(uint8_t));
+	DGS_MALLOC_CHECK(out->opacities);
 
-	out->colors = (uint16_t*)MGS_MALLOC(count * 3 * sizeof(uint16_t));
-	MGS_MALLOC_CHECK(out->colors);
+	out->colors = (uint16_t*)DGS_MALLOC(count * 3 * sizeof(uint16_t));
+	DGS_MALLOC_CHECK(out->colors);
 
 	if(shDegree > 0)
 	{
 		uint32_t numCoeffs = (shDegree + 1) * (shDegree + 1) - 1;
 
-		out->shs = (uint8_t*)MGS_MALLOC(count * numCoeffs * 3 * sizeof(uint8_t));
-		MGS_MALLOC_CHECK(out->shs);
+		out->shs = (uint8_t*)DGS_MALLOC(count * numCoeffs * 3 * sizeof(uint8_t));
+		DGS_MALLOC_CHECK(out->shs);
 	}
 
 	if(dynamic)
 	{
-		out->velocities = (QMvec4*)MGS_MALLOC(count * sizeof(QMvec4));
-		MGS_MALLOC_CHECK(out->velocities);
+		out->velocities = (QMvec4*)DGS_MALLOC(count * sizeof(QMvec4));
+		DGS_MALLOC_CHECK(out->velocities);
 	}
 
 	//return:
 	//---------------
 cleanup:
-	if(retval != MGS_SUCCESS)
-		mgs_gaussians_free(out);
+	if(retval != DGS_SUCCESS)
+		dgs_gaussians_free(out);
 
 	return retval;
 }
 
-void mgs_gaussians_free(MGSgaussians* g)
+void dgs_gaussians_free(DGSgaussians* g)
 {
 	if(g->means)
-		MGS_FREE(g->means);
+		DGS_FREE(g->means);
 	if(g->covariances)
-		MGS_FREE(g->covariances);
+		DGS_FREE(g->covariances);
 	if(g->opacities)
-		MGS_FREE(g->opacities);
+		DGS_FREE(g->opacities);
 	if(g->colors)
-		MGS_FREE(g->colors);
+		DGS_FREE(g->colors);
 
 	if(g->shs)
-		MGS_FREE(g->shs);
+		DGS_FREE(g->shs);
 
 	if(g->velocities)
-		MGS_FREE(g->velocities);
+		DGS_FREE(g->velocities);
 
-	MGS_STRUCTURE_CLEAR(g);
+	DGS_STRUCTURE_CLEAR(g);
 }
 
-MGSerror mgs_gaussians_combine(const MGSgaussians* g1, const MGSgaussians* g2, MGSgaussians* out)
+DGSerror dgs_gaussians_combine(const DGSgaussians* g1, const DGSgaussians* g2, DGSgaussians* out)
 {
-	MGSerror retval = MGS_SUCCESS;
+	DGSerror retval = DGS_SUCCESS;
 
-	MGS_STRUCTURE_CLEAR(out);
+	DGS_STRUCTURE_CLEAR(out);
 
 	//validate:
 	//---------------
 	if(g1->shDegree != g2->shDegree) //TODO: make this work
 	{
-		MGS_LOG_ERROR("cannot combine gaussians with different shDegree");
-		return MGS_ERROR_INVALID_INPUT;
+		DGS_LOG_ERROR("cannot combine gaussians with different shDegree");
+		return DGS_ERROR_INVALID_INPUT;
 	}
 
 	//compute metadata:
 	//---------------
 	uint32_t count = g1->count + g2->count;
 	uint32_t shDegree = g1->shDegree;
-	mgs_bool_t dynamic = (g1->dynamic || g2->dynamic);
+	dgs_bool_t dynamic = (g1->dynamic || g2->dynamic);
 
-	float colorMinOut = MGS_MIN(g1->colorMin, g2->colorMin);
-	float colorMaxOut = MGS_MAX(g1->colorMax, g2->colorMax);
-	float shMinOut    = MGS_MIN(g1->shMin, g2->shMin);
-	float shMaxOut    = MGS_MAX(g1->shMax, g2->shMax);
+	float colorMinOut = DGS_MIN(g1->colorMin, g2->colorMin);
+	float colorMaxOut = DGS_MAX(g1->colorMax, g2->colorMax);
+	float shMinOut    = DGS_MIN(g1->shMin, g2->shMin);
+	float shMaxOut    = DGS_MAX(g1->shMax, g2->shMax);
 
 	//allocate output:
 	//---------------
-	MGS_ERROR_PROPAGATE(
-		mgs_gaussians_allocate(count, shDegree, dynamic, out)
+	DGS_ERROR_PROPAGATE(
+		dgs_gaussians_allocate(count, shDegree, dynamic, out)
 	);
 
 	out->colorMin = colorMinOut;
@@ -218,31 +218,31 @@ MGSerror mgs_gaussians_combine(const MGSgaussians* g1, const MGSgaussians* g2, M
 	//cleanup + return:
 	//---------------
 cleanup:
-	if(retval != MGS_SUCCESS)
-		mgs_gaussians_free(out);
+	if(retval != DGS_SUCCESS)
+		dgs_gaussians_free(out);
 	
 	return retval;
 }
 
-MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t dynamic, MGSgaussiansF* out)
+DGSerror dgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, dgs_bool_t dynamic, DGSgaussiansF* out)
 {
-	MGSerror retval = MGS_SUCCESS;
+	DGSerror retval = DGS_SUCCESS;
 
-	MGS_STRUCTURE_CLEAR(out);
+	DGS_STRUCTURE_CLEAR(out);
 
 	//validate:
 	//---------------
 	if(count == 0)
 	{
-		MGS_LOG_ERROR("gaussian count must be positive");
-		retval = MGS_ERROR_INVALID_ARGUMENTS;
+		DGS_LOG_ERROR("gaussian count must be positive");
+		retval = DGS_ERROR_INVALID_ARGUMENTS;
 		goto cleanup;
 	}
 
-	if(shDegree > MGS_GAUSSIANS_MAX_SH_DEGREE)
+	if(shDegree > DGS_GAUSSIANS_MAX_SH_DEGREE)
 	{
-		MGS_LOG_ERROR("gaussian spherical harmomic degree must be less than MGS_GAUSSIANS_MAX_SH_DEGREE");
-		retval = MGS_ERROR_INVALID_ARGUMENTS;
+		DGS_LOG_ERROR("gaussian spherical harmomic degree must be less than DGS_GAUSSIANS_MAX_SH_DEGREE");
+		retval = DGS_ERROR_INVALID_ARGUMENTS;
 		goto cleanup;
 	}
 
@@ -254,75 +254,75 @@ MGSerror mgs_gaussiansf_allocate(uint32_t count, uint32_t shDegree, mgs_bool_t d
 
 	//allocate:
 	//---------------
-	out->means = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
-	MGS_MALLOC_CHECK(out->means);
+	out->means = (QMvec3*)DGS_MALLOC(count * sizeof(QMvec3));
+	DGS_MALLOC_CHECK(out->means);
 
-	out->scales = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
-	MGS_MALLOC_CHECK(out->scales);
+	out->scales = (QMvec3*)DGS_MALLOC(count * sizeof(QMvec3));
+	DGS_MALLOC_CHECK(out->scales);
 
-	out->rotations = (QMquaternion*)MGS_MALLOC(count * sizeof(QMquaternion));
-	MGS_MALLOC_CHECK(out->rotations);
+	out->rotations = (QMquaternion*)DGS_MALLOC(count * sizeof(QMquaternion));
+	DGS_MALLOC_CHECK(out->rotations);
 
-	out->opacities = (float*)MGS_MALLOC(count * sizeof(float));
-	MGS_MALLOC_CHECK(out->opacities);
+	out->opacities = (float*)DGS_MALLOC(count * sizeof(float));
+	DGS_MALLOC_CHECK(out->opacities);
 
 	uint32_t numCoeffs = (shDegree + 1) * (shDegree + 1);
-	out->shs = (float*)MGS_MALLOC(count * numCoeffs * 3 * sizeof(float));
-	MGS_MALLOC_CHECK(out->shs);
+	out->shs = (float*)DGS_MALLOC(count * numCoeffs * 3 * sizeof(float));
+	DGS_MALLOC_CHECK(out->shs);
 
 	if(dynamic)
 	{
-		out->velocities = (QMvec3*)MGS_MALLOC(count * sizeof(QMvec3));
-		MGS_MALLOC_CHECK(out->velocities);
+		out->velocities = (QMvec3*)DGS_MALLOC(count * sizeof(QMvec3));
+		DGS_MALLOC_CHECK(out->velocities);
 
-		out->tMeans = (float*)MGS_MALLOC(count * sizeof(float));
-		MGS_MALLOC_CHECK(out->tMeans);
+		out->tMeans = (float*)DGS_MALLOC(count * sizeof(float));
+		DGS_MALLOC_CHECK(out->tMeans);
 
-		out->tStdevs = (float*)MGS_MALLOC(count * sizeof(float));
-		MGS_MALLOC_CHECK(out->tStdevs);
+		out->tStdevs = (float*)DGS_MALLOC(count * sizeof(float));
+		DGS_MALLOC_CHECK(out->tStdevs);
 	}
 
 	//return:
 	//---------------
 cleanup:
-	if(retval != MGS_SUCCESS)
-		mgs_gaussiansf_free(out);
+	if(retval != DGS_SUCCESS)
+		dgs_gaussiansf_free(out);
 
 	return retval;
 }
 
-void mgs_gaussiansf_free(MGSgaussiansF* g)
+void dgs_gaussiansf_free(DGSgaussiansF* g)
 {
 	if(g->means)
-		MGS_FREE(g->means);
+		DGS_FREE(g->means);
 	if(g->scales)
-		MGS_FREE(g->scales);
+		DGS_FREE(g->scales);
 	if(g->rotations)
-		MGS_FREE(g->rotations);
+		DGS_FREE(g->rotations);
 	if(g->opacities)
-		MGS_FREE(g->opacities);
+		DGS_FREE(g->opacities);
 	if(g->shs)
-		MGS_FREE(g->shs);
+		DGS_FREE(g->shs);
 
 	if(g->velocities)
-		MGS_FREE(g->velocities);
+		DGS_FREE(g->velocities);
 	if(g->tMeans)
-		MGS_FREE(g->tMeans);
+		DGS_FREE(g->tMeans);
 	if(g->tStdevs)
-		MGS_FREE(g->tStdevs);
+		DGS_FREE(g->tStdevs);
 
-	MGS_STRUCTURE_CLEAR(g);
+	DGS_STRUCTURE_CLEAR(g);
 }
 
-MGSerror mgs_gaussians_to_fp32(const MGSgaussians* src, MGSgaussiansF* dst)
+DGSerror dgs_gaussians_to_fp32(const DGSgaussians* src, DGSgaussiansF* dst)
 {
-	MGSerror retval = MGS_SUCCESS;
+	DGSerror retval = DGS_SUCCESS;
 
-	MGS_STRUCTURE_CLEAR(dst);
+	DGS_STRUCTURE_CLEAR(dst);
 
 	//allocate:
 	//---------------
-	MGS_ERROR_PROPAGATE(mgs_gaussiansf_allocate(
+	DGS_ERROR_PROPAGATE(dgs_gaussiansf_allocate(
 		src->count, src->shDegree, src->dynamic, dst
 	));
 	
@@ -334,21 +334,21 @@ MGSerror mgs_gaussians_to_fp32(const MGSgaussians* src, MGSgaussiansF* dst)
 	//return:
 	//---------------
 cleanup:
-	if(retval != MGS_SUCCESS)
-		mgs_gaussiansf_free(dst);
+	if(retval != DGS_SUCCESS)
+		dgs_gaussiansf_free(dst);
 
 	return retval;
 }
 
-MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
+DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 {
-	MGSerror retval = MGS_SUCCESS;
+	DGSerror retval = DGS_SUCCESS;
 
-	MGS_STRUCTURE_CLEAR(dst);
+	DGS_STRUCTURE_CLEAR(dst);
 
 	//allocate:
 	//---------------
-	MGS_ERROR_PROPAGATE(mgs_gaussians_allocate(
+	DGS_ERROR_PROPAGATE(dgs_gaussians_allocate(
 		src->count, src->shDegree, src->dynamic, dst
 	));
 	
@@ -367,14 +367,14 @@ MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
 
 		for(uint32_t j = 0; j < 3; j++)
 		{
-			dst->colorMin = MGS_MIN(dst->colorMin, src->shs[idx + j]);
-			dst->colorMax = MGS_MAX(dst->colorMax, src->shs[idx + j]);
+			dst->colorMin = DGS_MIN(dst->colorMin, src->shs[idx + j]);
+			dst->colorMax = DGS_MAX(dst->colorMax, src->shs[idx + j]);
 		}
 
 		for(uint32_t j = 3; j < numShCoeffs * 3; j++)
 		{
-			dst->shMin = MGS_MIN(dst->shMin, src->shs[idx + j]);
-			dst->shMax = MGS_MAX(dst->shMax, src->shs[idx + j]);
+			dst->shMin = DGS_MIN(dst->shMin, src->shs[idx + j]);
+			dst->shMax = DGS_MAX(dst->shMax, src->shs[idx + j]);
 		}
 	}
 		
@@ -439,8 +439,8 @@ MGSerror mgs_gaussians_from_fp32(const MGSgaussiansF* src, MGSgaussians* dst)
 	//return:
 	//---------------
 cleanup:
-	if(retval != MGS_SUCCESS)
-		mgs_gaussians_free(dst);
+	if(retval != DGS_SUCCESS)
+		dgs_gaussians_free(dst);
 
 	return retval;
 }

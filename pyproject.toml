@@ -6,7 +6,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mgs"
+name = "dgs"
 version = "0.0.1"
 description = "Moving Gaussian Splats"
 readme = "README.md"
@@ -27,6 +27,6 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/True3DLabs/MGS"
-Repository = "https://github.com/True3DLabs/MGS"
-Issues = "https://github.com/True3DLabs/MGS/issues"
+Homepage = "https://github.com/splatsdotcom/DGS"
+Repository = "https://github.com/splatsdotcom/DGS"
+Issues = "https://github.com/splatsdotcom/DGS/issues"
