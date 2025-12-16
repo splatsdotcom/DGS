@@ -7,7 +7,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dgs"
+name = "dgs-py"
 version = "0.0.1"
 description = "Moving Gaussian Splats"
 readme = "README.md"
