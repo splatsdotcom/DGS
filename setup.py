@@ -44,7 +44,6 @@ def get_extension():
 # ------------------------------------------- #
 
 setup(
-	packages=find_packages(),
 	ext_modules=[ get_extension() ],
 	cmdclass={},
 )
