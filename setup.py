@@ -14,10 +14,8 @@ CSRC_DIR_ABSOLUTE = os.path.join(os.path.abspath(os.path.dirname(__file__)), "cs
 def get_extension():
 	linkArgs = [  ] if os.name == "nt" else [ "-O3" ]
 	compileArgs = ([ 
-		"/std:c++17", 
 		"/O2" 
 	] if os.name == "nt" else [
-		"-std=c++17",
 		"-O3",
 		"-Wno-missing-braces"
 	])
