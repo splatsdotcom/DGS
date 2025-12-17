@@ -13,7 +13,7 @@
 #define DGS_MAKE_VERSION(major, minor, patch) (((major) << 22) | ((minor) << 12) | (patch))
 
 #define DGS_MAGIC_WORD (('s' << 24) | ('p' << 16) | ('l' << 8) | ('g'))
-#define DGS_VERSION (DGS_MAKE_VERSION(1, 0, 0))
+#define DGS_VERSION (DGS_MAKE_VERSION(1, 0, 1))
 
 //-------------------------------------------//
 

@@ -13,6 +13,34 @@ namespace py = pybind11;
 
 //-------------------------------------------//
 
+struct DGSgaussiansDeleter
+{
+	void operator()(DGSgaussians* gaussians)
+	{
+		dgs_gaussians_free(gaussians);
+	}
+};
+
+struct DGSgaussiansFdeleter
+{
+	void operator()(DGSgaussiansF* gaussians)
+	{
+		dgs_gaussiansf_free(gaussians);
+	}
+};
+
+std::shared_ptr<DGSgaussians> gaussians_make_shared()
+{
+	return std::shared_ptr<DGSgaussians>(new DGSgaussians, DGSgaussiansDeleter{});
+}
+
+std::shared_ptr<DGSgaussiansF> gaussiansf_make_shared()
+{
+	return std::shared_ptr<DGSgaussiansF>(new DGSgaussiansF, DGSgaussiansFdeleter{});
+}
+
+//-------------------------------------------//
+
 std::shared_ptr<DGSgaussians> read_or_decode(const py::object obj, DGSmetadata& metadata);
 
 //-------------------------------------------//
@@ -110,7 +138,7 @@ PYBIND11_MODULE(_C, m)
 
 			//return:
 			//---------------
-			std::shared_ptr<DGSgaussians> out = std::make_shared<DGSgaussians>();
+			std::shared_ptr<DGSgaussians> out = gaussians_make_shared();
 
 			DGSerror error = dgs_gaussians_from_fp32(&gaussians, out.get());
 			if(error != DGS_SUCCESS)
@@ -166,7 +194,7 @@ PYBIND11_MODULE(_C, m)
 
 	m.def("decode", [](const std::string& path)
 	{
-		std::shared_ptr<DGSgaussians> out = std::make_shared<DGSgaussians>();
+		std::shared_ptr<DGSgaussians> out = gaussians_make_shared();
 		DGSmetadata outMetadata;
 
 		DGSerror error = dgs_decode_from_file(path.c_str(), out.get(), &outMetadata);
@@ -190,7 +218,7 @@ PYBIND11_MODULE(_C, m)
 
 		//combine:
 		//---------------
-		std::shared_ptr<DGSgaussians> out = std::make_shared<DGSgaussians>();
+		std::shared_ptr<DGSgaussians> out = gaussians_make_shared();
 
 		DGSerror error = dgs_gaussians_combine(g1.get(), g2.get(), out.get());
 		if(error != DGS_SUCCESS)
@@ -228,7 +256,7 @@ std::shared_ptr<DGSgaussians> read_or_decode(const py::object obj, DGSmetadata& 
 	if(py::isinstance<py::str>(obj))
 	{
 		std::string path = obj.cast<std::string>();
-		out = std::make_shared<DGSgaussians>();
+		out = gaussians_make_shared();
 
 		DGSerror error = dgs_decode_from_file(path.c_str(), out.get(), &metadata);
 		if(error != DGS_SUCCESS)
