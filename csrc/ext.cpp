@@ -45,8 +45,6 @@ std::shared_ptr<DGSgaussians> read_or_decode(const py::object obj, DGSmetadata& 
 
 //-------------------------------------------//
 
-//TODO: DGSgaussians and DGSgaussiansF leak memory, no destructor!!
-
 PYBIND11_MODULE(_C, m)
 {
 	m.doc() = "DGS Core";
