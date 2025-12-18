@@ -112,9 +112,9 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 		goto cleanup;
 	}
 
-	if(header.version != DGS_VERSION) //TODO: keep versions compatible!
+	if(header.version < DGS_MAKE_VERSION(1, 0, 0) || header.version >= DGS_MAKE_VERSION(1, 1, 0))
 	{
-		DGS_LOG_ERROR("mismatched version");
+		DGS_LOG_ERROR("mismatched version! expected 1.0.x");
 		retval = DGS_ERROR_INVALID_INPUT;
 		goto cleanup;
 	}

@@ -8,8 +8,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgs-py"
-version = "1.0.1"
-description = "Moving Gaussian Splats"
+version = "1.0.2"
+description = "Dynamic Gaussian Splats"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
