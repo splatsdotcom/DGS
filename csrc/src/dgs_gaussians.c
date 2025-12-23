@@ -34,18 +34,23 @@ DGSerror dgs_gaussians_allocate(uint32_t count, uint32_t shDegree, dgs_bool_t dy
 	out->shDegree = shDegree;
 	out->dynamic = dynamic;
 
-	out->colorMin = -1.0f;
-	out->colorMax =  1.0f;
-	out->shMin = -1.0f;
-	out->shMax =  1.0f;
+	out->scaleMin =  INFINITY;
+	out->scaleMax = -INFINITY;
+	out->colorMin =  INFINITY;
+	out->colorMax = -INFINITY;
+	out->shMin =  INFINITY;
+	out->shMax = -INFINITY;
 
 	//allocate:
 	//---------------
 	out->means = (QMvec4*)DGS_MALLOC(count * sizeof(QMvec4));
 	DGS_MALLOC_CHECK(out->means);
 
-	out->covariances = (float*)DGS_MALLOC(count * 6 * sizeof(float));
-	DGS_MALLOC_CHECK(out->covariances);
+	out->scales = (uint16_t*)DGS_MALLOC(count * 3 * sizeof(uint16_t));
+	DGS_MALLOC_CHECK(out->scales);
+
+	out->rotations = (uint16_t*)DGS_MALLOC(count * 3 * sizeof(uint16_t));
+	DGS_MALLOC_CHECK(out->rotations);
 
 	out->opacities = (uint8_t*)DGS_MALLOC(count * sizeof(uint8_t));
 	DGS_MALLOC_CHECK(out->opacities);
@@ -80,8 +85,10 @@ void dgs_gaussians_free(DGSgaussians* g)
 {
 	if(g->means)
 		DGS_FREE(g->means);
-	if(g->covariances)
-		DGS_FREE(g->covariances);
+	if(g->scales)
+		DGS_FREE(g->scales);
+	if(g->rotations)
+		DGS_FREE(g->rotations);
 	if(g->opacities)
 		DGS_FREE(g->opacities);
 	if(g->colors)
@@ -116,6 +123,8 @@ DGSerror dgs_gaussians_combine(const DGSgaussians* g1, const DGSgaussians* g2, D
 	uint32_t shDegree = g1->shDegree;
 	dgs_bool_t dynamic = (g1->dynamic || g2->dynamic);
 
+	float scaleMinOut = DGS_MIN(g1->scaleMin, g2->scaleMin);
+	float scaleMaxOut = DGS_MAX(g1->scaleMax, g2->scaleMax);
 	float colorMinOut = DGS_MIN(g1->colorMin, g2->colorMin);
 	float colorMaxOut = DGS_MAX(g1->colorMax, g2->colorMax);
 	float shMinOut    = DGS_MIN(g1->shMin, g2->shMin);
@@ -127,6 +136,8 @@ DGSerror dgs_gaussians_combine(const DGSgaussians* g1, const DGSgaussians* g2, D
 		dgs_gaussians_allocate(count, shDegree, dynamic, out)
 	);
 
+	out->scaleMin = scaleMinOut;
+	out->scaleMax = scaleMaxOut;
 	out->colorMin = colorMinOut;
 	out->colorMax = colorMaxOut;
 	out->shMin    = shMinOut;
@@ -137,11 +148,39 @@ DGSerror dgs_gaussians_combine(const DGSgaussians* g1, const DGSgaussians* g2, D
 	memcpy(out->means            , g1->means, sizeof(QMvec4) * g1->count);
 	memcpy(out->means + g1->count, g2->means, sizeof(QMvec4) * g2->count);
 
-	memcpy(out->covariances                , g1->covariances, sizeof(float) * 6 * g1->count);
-	memcpy(out->covariances + 6 * g1->count, g2->covariances, sizeof(float) * 6 * g2->count);
+	memcpy(out->rotations                , g1->rotations, sizeof(uint16_t) * 3 * g1->count);
+	memcpy(out->rotations + 3 * g1->count, g2->rotations, sizeof(uint16_t) * 3 * g2->count);
 
 	memcpy(out->opacities            , g1->opacities, sizeof(uint8_t) * g1->count);
 	memcpy(out->opacities + g1->count, g2->opacities, sizeof(uint8_t) * g2->count);
+
+	//re-normalize and copy scales:
+	//---------------
+	float scaleScaleOut = (scaleMaxOut - scaleMinOut);
+
+	for(uint32_t i = 0; i < count; i++)
+	for(uint32_t j = 0; j < 3; j++)
+	{
+		uint16_t v;
+		float offset, scale;
+
+		if(i < g1->count)
+		{
+			v = g1->scales[i * 3 + j];
+			offset = g1->scaleMin;
+			scale = g1->scaleMax - g1->scaleMin;
+		}
+		else
+		{
+			v = g2->scales[(i - g1->count) * 3 + j];
+			offset = g2->scaleMin;
+			scale = g2->scaleMax - g2->scaleMin;
+		}
+
+		float vf = ((float)v / UINT16_MAX) * scale + offset;
+		float vn = (vf - scaleMinOut) / scaleScaleOut;
+		out->scales[i * 3 + j] = (uint16_t)(vn * UINT16_MAX);
+	}
 
 	//re-normalize and copy colors:
 	//---------------
@@ -356,6 +395,8 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 	//---------------
 	uint32_t numShCoeffs = (src->shDegree + 1) * (src->shDegree + 1);
 
+	dst->scaleMin =  INFINITY;
+	dst->scaleMax = -INFINITY;
 	dst->colorMin =  INFINITY;
 	dst->colorMax = -INFINITY;
 	dst->shMin =  INFINITY;
@@ -364,6 +405,12 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 	for(uint32_t i = 0; i < src->count; i++)
 	{
 		uint32_t idx = i * (numShCoeffs * 3);
+
+		for(uint32_t j = 0; j < 3; j++)
+		{
+			dst->scaleMin = DGS_MIN(dst->scaleMin, src->scales[idx].v[j]);
+			dst->scaleMax = DGS_MAX(dst->scaleMax, src->scales[idx].v[j]);
+		}
 
 		for(uint32_t j = 0; j < 3; j++)
 		{
@@ -380,6 +427,7 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 		
 	//convert:
 	//---------------
+	float scaleScale = 1.0f / (dst->scaleMax - dst->scaleMin);
 	float colorScale = 1.0f / (dst->colorMax - dst->colorMin);
 	float shScale = 1.0f / (dst->shMax - dst->shMin);
 
@@ -396,22 +444,15 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 			src->dynamic ? src->tMeans[i] : 0.5f
 		};
 
-		//covariance
-		QMmat4 M = qm_mat4_mult(
-			qm_mat4_scale(src->scales[i]), 
-			qm_quaternion_to_mat4(src->rotations[i])
-		);
-		float covariance[6] = {
-			M.m[0][0] * M.m[0][0] + M.m[0][1] * M.m[0][1] + M.m[0][2] * M.m[0][2],
-			M.m[0][0] * M.m[1][0] + M.m[0][1] * M.m[1][1] + M.m[0][2] * M.m[1][2],
-			M.m[0][0] * M.m[2][0] + M.m[0][1] * M.m[2][1] + M.m[0][2] * M.m[2][2],
-			M.m[1][0] * M.m[1][0] + M.m[1][1] * M.m[1][1] + M.m[1][2] * M.m[1][2],
-			M.m[1][0] * M.m[2][0] + M.m[1][1] * M.m[2][1] + M.m[1][2] * M.m[2][2],
-			M.m[2][0] * M.m[2][0] + M.m[2][1] * M.m[2][1] + M.m[2][2] * M.m[2][2]
-		};
+		//scale
+		for(uint32_t j = 0; j < 3; j++)
+			dst->scales[i * 3 + j] = (uint16_t)((src->scales[i].v[j] - dst->scaleMin) * scaleScale * UINT16_MAX);
 
-		for(uint32_t j = 0; j < 6; j++)
-			dst->covariances[i * 6 + j] = 4.0f * covariance[j];
+		//rotation
+		QMquaternion norm = qm_quaternion_normalize(src->rotations[i]);
+		
+		for(uint32_t j = 0; j < 3; j++)
+			dst->rotations[i * 3 + j] = (uint16_t)(norm.q[j] * UINT16_MAX);
 
 		//opacity
 		dst->opacities[i] = (uint8_t)(src->opacities[i] * UINT8_MAX);

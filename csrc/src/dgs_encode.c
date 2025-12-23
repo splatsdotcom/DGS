@@ -42,6 +42,8 @@ DGSerror dgs_encode(const DGSgaussians* g, DGSmetadata metadata, const char* out
 
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->shDegree, sizeof(uint32_t)));
 	
+	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->scaleMin, sizeof(float)));
+	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->scaleMax, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->colorMin, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->colorMax, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, &g->shMin   , sizeof(float)));
@@ -52,7 +54,8 @@ DGSerror dgs_encode(const DGSgaussians* g, DGSmetadata metadata, const char* out
 	uint32_t numShCoeff = (g->shDegree + 1) * (g->shDegree + 1) - 1;
 
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->means, g->count * 4 * sizeof(float)));
-	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->covariances, g->count * 6 * sizeof(float)));
+	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->scales, g->count * 3 * sizeof(uint16_t)));
+	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->rotations, g->count * 3 * sizeof(uint16_t)));
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->opacities, g->count * sizeof(uint8_t)));
 	DGS_ERROR_PROPAGATE(_dgs_fwrite(out, g->colors, g->count * 3 * sizeof(uint16_t)));
 

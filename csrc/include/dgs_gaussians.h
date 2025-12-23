@@ -19,23 +19,23 @@
  */
 typedef struct DGSgaussians
 {
-	//TODO: find optimal memory layout
-	//TODO: store precomputed covariance? or rot + scale? probably want to match DGSgaussiansF
-
 	uint32_t count;
 	uint32_t shDegree;
 	dgs_bool_t dynamic;
 
+	float scaleMin;
+	float scaleMax;
 	float colorMin;
 	float colorMax;
 	float shMin;
 	float shMax;
 
-	QMvec4* means;      // (mean x, mean y, mean z, mean t) fp32
-	float* covariances; // (m00, m01, m02, m11, m12, m22) fp32
-	uint8_t* opacities; // (a) unorm8 in [0.0, 1.0]
-	uint16_t* colors;   // (r, g, b) unorm16 in [colorMin, colorMax]
-	uint8_t* shs;       // (shDegree + 1)^2 - 1 (r, g, b) unorm8 in [shMin, shMax], NULL if shDegree == 0
+	QMvec4* means;       // (mean x, mean y, mean z, mean t) fp32
+	uint16_t* scales;    // (scale x, scale y, scale z) unorm16 in [colorMin, colorMax], stored in log space
+	uint16_t* rotations; // (rot x, rot y, rot z) unorm16 in [0.0, 1.0]
+	uint8_t* opacities;  // (a) unorm8 in [0.0, 1.0]
+	uint16_t* colors;    // (r, g, b) unorm16 in [colorMin, colorMax]
+	uint8_t* shs;        // (shDegree + 1)^2 - 1 (r, g, b) unorm8 in [shMin, shMax], NULL if shDegree == 0
 
 	QMvec4* velocities; // (vel x, vel y, vel z, t-stdev) fp32, NULL if dynamic == DGS_FALSE
 } DGSgaussians;

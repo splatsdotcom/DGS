@@ -112,9 +112,9 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 		goto cleanup;
 	}
 
-	if(header.version < DGS_MAKE_VERSION(1, 0, 0) || header.version >= DGS_MAKE_VERSION(1, 1, 0))
+	if(header.version < DGS_MAKE_VERSION(1, 1, 0) || header.version >= DGS_MAKE_VERSION(1, 2, 0))
 	{
-		DGS_LOG_ERROR("mismatched version! expected 1.0.x");
+		DGS_LOG_ERROR("mismatched version! expected 1.1.x");
 		retval = DGS_ERROR_INVALID_INPUT;
 		goto cleanup;
 	}
@@ -128,6 +128,7 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 	dgs_bool_t dynamic;
 	uint32_t shDegree;
 
+	float scaleMin, scaleMax;
 	float colorMin, colorMax;
 	float shMin, shMax;
 
@@ -136,6 +137,8 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, &shDegree, sizeof(uint32_t)));
 	
+	DGS_ERROR_PROPAGATE(_dgs_read(reader, &scaleMin, sizeof(float)));
+	DGS_ERROR_PROPAGATE(_dgs_read(reader, &scaleMax, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, &colorMin, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, &colorMax, sizeof(float)));
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, &shMin   , sizeof(float)));
@@ -153,6 +156,13 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 	if(shDegree > DGS_GAUSSIANS_MAX_SH_DEGREE)
 	{
 		DGS_LOG_ERROR("out of bounds sh degree");
+		retval = DGS_ERROR_INVALID_INPUT;
+		goto cleanup;
+	}
+
+	if(scaleMin > scaleMax)
+	{
+		DGS_LOG_ERROR("invalid scale normalization coefficients");
 		retval = DGS_ERROR_INVALID_INPUT;
 		goto cleanup;
 	}
@@ -177,6 +187,8 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 		count, shDegree, dynamic, out
 	));
 
+	out->scaleMin = scaleMin;
+	out->scaleMax = scaleMax;
 	out->colorMin = colorMin;
 	out->colorMax = colorMax;
 	out->shMin = shMin;
@@ -187,7 +199,8 @@ static DGSerror _dgs_decode(DGSreader* reader, DGSgaussians* out, DGSmetadata* o
 	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
 
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->means, count * 4 * sizeof(float)));
-	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->covariances, count * 6 * sizeof(float)));
+	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->scales, count * 3 * sizeof(uint16_t)));
+	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->rotations, count * 3 * sizeof(uint16_t)));
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->opacities, count * sizeof(uint8_t)));
 	DGS_ERROR_PROPAGATE(_dgs_read(reader, out->colors, count * 3 * sizeof(uint16_t)));
 
