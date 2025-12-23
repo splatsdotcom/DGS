@@ -452,7 +452,7 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 		QMquaternion norm = qm_quaternion_normalize(src->rotations[i]);
 		
 		for(uint32_t j = 0; j < 3; j++)
-			dst->rotations[i * 3 + j] = (uint16_t)(norm.q[j] * UINT16_MAX);
+			dst->rotations[i * 3 + j] = (uint16_t)((norm.q[j] + 1.0f) / 2.0f * UINT16_MAX);
 
 		//opacity
 		dst->opacities[i] = (uint8_t)(src->opacities[i] * UINT8_MAX);
