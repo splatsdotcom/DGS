@@ -404,27 +404,27 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 
 	for(uint32_t i = 0; i < src->count; i++)
 	{
-		uint32_t idx = i * (numShCoeffs * 3);
+		uint32_t shIdx = i * (numShCoeffs * 3);
 
 		for(uint32_t j = 0; j < 3; j++)
 		{
-			dst->scaleMin = DGS_MIN(dst->scaleMin, src->scales[idx].v[j]);
-			dst->scaleMax = DGS_MAX(dst->scaleMax, src->scales[idx].v[j]);
+			dst->scaleMin = DGS_MIN(dst->scaleMin, src->scales[i].v[j]);
+			dst->scaleMax = DGS_MAX(dst->scaleMax, src->scales[i].v[j]);
 		}
 
 		for(uint32_t j = 0; j < 3; j++)
 		{
-			dst->colorMin = DGS_MIN(dst->colorMin, src->shs[idx + j]);
-			dst->colorMax = DGS_MAX(dst->colorMax, src->shs[idx + j]);
+			dst->colorMin = DGS_MIN(dst->colorMin, src->shs[shIdx + j]);
+			dst->colorMax = DGS_MAX(dst->colorMax, src->shs[shIdx + j]);
 		}
 
 		for(uint32_t j = 3; j < numShCoeffs * 3; j++)
 		{
-			dst->shMin = DGS_MIN(dst->shMin, src->shs[idx + j]);
-			dst->shMax = DGS_MAX(dst->shMax, src->shs[idx + j]);
+			dst->shMin = DGS_MIN(dst->shMin, src->shs[shIdx + j]);
+			dst->shMax = DGS_MAX(dst->shMax, src->shs[shIdx + j]);
 		}
 	}
-		
+
 	//convert:
 	//---------------
 	float scaleScale = 1.0f / (dst->scaleMax - dst->scaleMin);
@@ -450,6 +450,8 @@ DGSerror dgs_gaussians_from_fp32(const DGSgaussiansF* src, DGSgaussians* dst)
 
 		//rotation
 		QMquaternion norm = qm_quaternion_normalize(src->rotations[i]);
+		if(norm.w < 0.0f)
+			norm = qm_quaternion_scale(norm, -1.0f);
 		
 		for(uint32_t j = 0; j < 3; j++)
 			dst->rotations[i * 3 + j] = (uint16_t)((norm.q[j] + 1.0f) / 2.0f * UINT16_MAX);
