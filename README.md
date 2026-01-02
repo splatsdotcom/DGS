@@ -41,6 +41,9 @@ harmonics = (np.array([
 	[ [1.0, 0.0, 0.0] ], [ [0.0, 1.0, 0.0] ], [ [0.0, 0.0, 1.0] ]
 ], dtype=np.float32) - 0.5) / 0.28209479177387814
 
+# activate:
+scales = np.log(scales);
+
 # encode:
 gaussians = dgs.Gaussians(
 	means, scales, rotations, opacities, harmonics
